@@ -95,7 +95,7 @@ mod tests {
     use super::*;
     use crate::db::ms_to_timestamp;
     use crate::db::tests::{test_entry, test_lease, test_session};
-    use crate::gen::context::ContextEntry;
+    use fabric_types::context::ContextEntry;
 
     fn replica(session_id: &str, lease_id: &str, holder: &str) -> ContextStore {
         let store = ContextStore::open_in_memory().unwrap();

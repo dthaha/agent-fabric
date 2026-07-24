@@ -3,7 +3,6 @@
 //! deterministic offline reconcile — backed by SQLite (WAL mode).
 
 pub mod db;
-pub mod gen;
 pub mod handoff;
 pub mod reconcile;
 

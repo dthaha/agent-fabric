@@ -6,7 +6,7 @@
 use regex::Regex;
 use thiserror::Error;
 
-use fabric_context::gen::policy::{DlpAction, DlpPattern, EffectivePolicy, ToolAction};
+use fabric_types::policy::{DlpAction, DlpPattern, EffectivePolicy, ToolAction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
@@ -319,7 +319,7 @@ pub fn glob_matches(pattern: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabric_context::gen::policy::{
+    use fabric_types::policy::{
         CuaPolicy, DataClassRule, DlpPattern, InferenceRule, ModelRule, ToolRule,
     };
 

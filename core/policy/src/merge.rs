@@ -4,7 +4,7 @@
 //! stack on top. Evaluation precedence is applied in [`crate::eval`]; the
 //! merge preserves every rule so the gate can apply strictest-match.
 
-use fabric_context::gen::policy::{CuaPolicy, EffectivePolicy, EndpointPolicy, HostedPolicy};
+use fabric_types::policy::{CuaPolicy, EffectivePolicy, EndpointPolicy, HostedPolicy};
 
 /// Merge an endpoint policy with a hosted policy into the EffectivePolicy
 /// consumed by the evaluation gate.
@@ -42,7 +42,7 @@ pub fn restrictive_cua_default() -> CuaPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabric_context::gen::policy::{InferenceRule, ToolAction, ToolRule};
+    use fabric_types::policy::{InferenceRule, ToolAction, ToolRule};
 
     fn endpoint_policy() -> EndpointPolicy {
         EndpointPolicy {

@@ -1,13 +1,12 @@
 [package]
-name = "fabric-policy"
+name = "fabric-types"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-fabric-types = { path = "../types" }
-regex.workspace = true
+prost.workspace = true
+pbjson.workspace = true
+pbjson-types.workspace = true
 serde.workspace = true
-thiserror.workspace = true
-tracing.workspace = true

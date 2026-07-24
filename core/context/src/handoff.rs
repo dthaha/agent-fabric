@@ -7,8 +7,8 @@ use tracing::instrument;
 use uuid::Uuid;
 
 use crate::db::{ContextStore, Result, StoreError};
-use crate::gen::context::{ContextEntry, EntryKind, Locus, SessionState};
-use crate::gen::lease::{HandoffAck, HandoffRequest, Lease, LocusKind};
+use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionState};
+use fabric_types::lease::{HandoffAck, HandoffRequest, Lease, LocusKind};
 
 /// Safety-net lease TTL handed to a new holder: 30 seconds. Leases are
 /// turn-scoped (acquired at turn start, released at turn end); the TTL only
@@ -123,7 +123,7 @@ pub fn catch_up(source: &ContextStore, target: &ContextStore, session_id: &str) 
 mod tests {
     use super::*;
     use crate::db::tests::{test_entry, test_lease, test_session};
-    use crate::gen::lease::LeaseState;
+    use fabric_types::lease::LeaseState;
 
     fn setup() -> (ContextStore, Lease) {
         let store = ContextStore::open_in_memory().unwrap();

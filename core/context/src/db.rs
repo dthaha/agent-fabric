@@ -6,8 +6,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use thiserror::Error;
 use tracing::instrument;
 
-use crate::gen::context::{ContextEntry, SessionMeta, SessionState};
-use crate::gen::lease::{Lease, LeaseState, LocusKind};
+use fabric_types::context::{ContextEntry, SessionMeta, SessionState};
+use fabric_types::lease::{Lease, LeaseState, LocusKind};
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -472,8 +472,8 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextEntry> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::gen::context::{EntryKind, Locus, SessionState};
-    use crate::gen::lease::LocusKind;
+    use fabric_types::context::{EntryKind, Locus, SessionState};
+    use fabric_types::lease::LocusKind;
 
     pub(crate) fn test_session(session_id: &str) -> SessionMeta {
         SessionMeta {

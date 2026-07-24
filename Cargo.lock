@@ -151,9 +151,8 @@ dependencies = [
 name = "fabric-context"
 version = "0.1.0"
 dependencies = [
- "pbjson",
+ "fabric-types",
  "pbjson-types",
- "prost",
  "rusqlite",
  "serde",
  "serde_json",
@@ -314,7 +313,7 @@ dependencies = [
 name = "fabric-policy"
 version = "0.1.0"
 dependencies = [
- "fabric-context",
+ "fabric-types",
  "regex",
  "serde",
  "thiserror",
@@ -360,6 +359,16 @@ dependencies = [
  "fabric-context",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fabric-types"
+version = "0.1.0"
+dependencies = [
+ "pbjson",
+ "pbjson-types",
+ "prost",
+ "serde",
 ]
 
 [[package]]

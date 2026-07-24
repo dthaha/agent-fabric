@@ -1,5 +1,6 @@
-//! Generated protobuf types. Produced by `make proto` (buf generate) into
-//! `src/gen/`; this module wires the generated files into the crate.
+//! Generated protobuf types, shared by every crate in the fabric. Produced
+//! by `make proto` (buf generate) into `src/gen/`; this module wires the
+//! generated files into the crate.
 //!
 //! Do not edit by hand. Proto contracts in `proto/` are the source of truth.
 #![allow(missing_docs)]

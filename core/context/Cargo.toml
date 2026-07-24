@@ -6,8 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-prost.workspace = true
-pbjson.workspace = true
+fabric-types = { path = "../types" }
 pbjson-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
