@@ -60,15 +60,32 @@ impl PolicyGate {
 
     /// Gate a tool invocation. All matching rules are considered; the
     /// strictest action wins (DENY > REQUIRE_APPROVAL > ALLOW). No matching
-    /// rule means deny (fail closed).
+    /// rule means deny (fail closed). Rule conditions are ignored.
     pub fn check_tool(&self, tool_name: &str) -> Decision {
+        self.eval_tool(tool_name, |_| true)
+    }
+
+    /// Gate a tool invocation with execution context, evaluating rule
+    /// conditions. A rule whose condition does not match the current locus /
+    /// local hour is skipped. Empty conditions always match.
+    pub fn check_tool_with_context(&self, tool_name: &str, locus: &str, hour: u32) -> Decision {
+        self.eval_tool(tool_name, |rule| {
+            condition_matches(&rule.condition, locus, hour)
+        })
+    }
+
+    fn eval_tool(
+        &self,
+        tool_name: &str,
+        condition_ok: impl Fn(&fabric_types::policy::ToolRule) -> bool,
+    ) -> Decision {
         if self.is_killed() {
             return Decision::Deny("kill switch engaged".into());
         }
         let mut saw_allow = false;
         let mut approval: Option<String> = None;
         for rule in &self.effective.tool_rules {
-            if !glob_matches(&rule.tool_pattern, tool_name) {
+            if !glob_matches(&rule.tool_pattern, tool_name) || !condition_ok(rule) {
                 continue;
             }
             match ToolAction::try_from(rule.action) {
@@ -335,6 +352,30 @@ pub struct DlpOutcome {
     pub action: Option<DlpAction>,
     pub matched_patterns: Vec<String>,
     pub redacted_content: String,
+}
+
+/// Evaluate a rule condition against the execution context. Conditions are
+/// simple `key=value` expressions AND-joined with `&&`. Supported keys:
+/// `locus` (endpoint|hosted) and `time` (day = 06:00–18:00, night otherwise).
+/// An empty condition always matches; unknown keys or values never match
+/// (fail closed).
+pub fn condition_matches(condition: &str, locus: &str, hour: u32) -> bool {
+    let condition = condition.trim();
+    if condition.is_empty() {
+        return true;
+    }
+    condition.split("&&").all(|clause| {
+        let clause = clause.trim();
+        let Some((key, value)) = clause.split_once('=') else {
+            return false;
+        };
+        match (key.trim(), value.trim()) {
+            ("locus", v) => v == locus,
+            ("time", "day") => (6..18).contains(&hour),
+            ("time", "night") => !(6..18).contains(&hour),
+            _ => false,
+        }
+    })
 }
 
 /// Glob matcher supporting `*` (any sequence) and exact matches. Patterns
@@ -638,6 +679,72 @@ mod tests {
     fn zero_session_limits_are_unlimited() {
         let g = gate(vec![]);
         assert!(g.check_session_limits(9999.0, 9999).is_allowed());
+    }
+
+    #[test]
+    fn tool_conditions_gate_by_locus_and_time() {
+        let cond_rule = |pattern: &str, action: ToolAction, condition: &str| ToolRule {
+            tool_pattern: pattern.into(),
+            action: action as i32,
+            condition: condition.into(),
+        };
+
+        // locus=endpoint: allows on endpoint, skipped (deny, fail closed) on hosted.
+        let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "locus=endpoint")]);
+        assert!(g
+            .check_tool_with_context("shell.exec", "endpoint", 12)
+            .is_allowed());
+        assert!(matches!(
+            g.check_tool_with_context("shell.exec", "hosted", 12),
+            Decision::Deny(_)
+        ));
+
+        // time=night allow-rule does not match at 3pm.
+        let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "time=night")]);
+        assert!(matches!(
+            g.check_tool_with_context("shell.exec", "endpoint", 15),
+            Decision::Deny(_)
+        ));
+        assert!(g
+            .check_tool_with_context("shell.exec", "endpoint", 23)
+            .is_allowed());
+
+        // Empty condition matches everywhere.
+        let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "")]);
+        for locus in ["endpoint", "hosted"] {
+            for hour in [0, 12, 23] {
+                assert!(g.check_tool_with_context("shell.exec", locus, hour).is_allowed());
+            }
+        }
+
+        // AND-joined conditions.
+        let g = gate(vec![cond_rule(
+            "shell.*",
+            ToolAction::Allow,
+            "locus=endpoint && time=day",
+        )]);
+        assert!(g
+            .check_tool_with_context("shell.exec", "endpoint", 10)
+            .is_allowed());
+        assert!(matches!(
+            g.check_tool_with_context("shell.exec", "endpoint", 22),
+            Decision::Deny(_)
+        ));
+        assert!(matches!(
+            g.check_tool_with_context("shell.exec", "hosted", 10),
+            Decision::Deny(_)
+        ));
+
+        // check_tool ignores conditions (backward compat).
+        let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "locus=hosted")]);
+        assert!(g.check_tool("shell.exec").is_allowed());
+
+        // Unknown condition keys never match.
+        let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "weather=sunny")]);
+        assert!(matches!(
+            g.check_tool_with_context("shell.exec", "endpoint", 12),
+            Decision::Deny(_)
+        ));
     }
 
     #[test]
