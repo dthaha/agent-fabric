@@ -22,6 +22,8 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/status", get(status))
+        .route("/sessions", get(sessions))
+        .route("/policy", get(policy))
         .with_state(state)
 }
 
@@ -99,6 +101,48 @@ async fn status(State(state): State<Arc<DaemonState>>) -> Json<Value> {
     }))
 }
 
+/// List active sessions from the context store. Read-only admin endpoint
+/// for the CLI.
+async fn sessions(State(state): State<Arc<DaemonState>>) -> Json<Value> {
+    let list = state
+        .store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store.list_active_sessions().ok().map(|sessions| {
+                sessions
+                    .iter()
+                    .map(|s| {
+                        json!({
+                            "session_id": s.session_id,
+                            "state": fabric_types::context::SessionState::try_from(s.state)
+                                .map(|st| st.as_str_name())
+                                .unwrap_or("UNKNOWN"),
+                            "created_at": s.created_at.as_ref().map(|t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000).unwrap_or(0),
+                            "last_entry_seq": store.head_seq(&s.session_id).unwrap_or(0),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+        })
+        .unwrap_or_default();
+    Json(json!(list))
+}
+
+/// Summary of the current effective policy. Read-only admin endpoint for
+/// the CLI.
+async fn policy(State(state): State<Arc<DaemonState>>) -> Json<Value> {
+    let policy = state.policy.read().expect("policy lock poisoned");
+    let effective = policy.effective();
+    Json(json!({
+        "endpoint_version": policy.endpoint_version().unwrap_or(""),
+        "hosted_version": policy.hosted_version().unwrap_or(""),
+        "tool_rule_count": effective.tool_rules.len(),
+        "kill_switch": effective.kill_switch,
+        "cua_enabled": effective.cua.as_ref().is_some_and(|c| c.enabled),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +201,77 @@ mod tests {
         let (code, body) = get(&app, "/readyz").await;
         assert_eq!(code, StatusCode::OK);
         assert_eq!(body["ready"], true);
+    }
+
+    #[tokio::test]
+    async fn sessions_lists_active_sessions() {
+        let state = test_state();
+        {
+            let store = state.store.lock().unwrap();
+            store
+                .create_session(&fabric_types::context::SessionMeta {
+                    session_id: "s1".into(),
+                    soul_id: "soul".into(),
+                    user_id: "user".into(),
+                    state: fabric_types::context::SessionState::Active as i32,
+                    active_lease: String::new(),
+                    created_at: Some(pbjson_types::Timestamp {
+                        seconds: 100,
+                        nanos: 0,
+                    }),
+                    last_activity: None,
+                    labels: Default::default(),
+                    org_id: String::new(),
+                })
+                .unwrap();
+        }
+        let app = router(state);
+
+        let (code, body) = get(&app, "/sessions").await;
+        assert_eq!(code, StatusCode::OK);
+        let sessions = body.as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["session_id"], "s1");
+        assert_eq!(sessions[0]["state"], "SESSION_STATE_ACTIVE");
+        assert_eq!(sessions[0]["created_at"], 100_000);
+        assert_eq!(sessions[0]["last_entry_seq"], 0);
+    }
+
+    #[tokio::test]
+    async fn policy_reports_effective_summary() {
+        let state = test_state();
+        state.policy.write().unwrap().load_endpoint(EndpointPolicy {
+            policy_id: "ep".into(),
+            version: "v3".into(),
+            org_id: "org".into(),
+            kill_switch: true,
+            tool_rules: vec![
+                fabric_types::policy::ToolRule {
+                    tool_pattern: "fs.*".into(),
+                    action: fabric_types::policy::ToolAction::Allow as i32,
+                    condition: String::new(),
+                },
+                fabric_types::policy::ToolRule {
+                    tool_pattern: "shell.exec".into(),
+                    action: fabric_types::policy::ToolAction::Deny as i32,
+                    condition: String::new(),
+                },
+            ],
+            cua: Some(fabric_types::policy::CuaPolicy {
+                enabled: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let app = router(state);
+
+        let (code, body) = get(&app, "/policy").await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body["endpoint_version"], "v3");
+        assert_eq!(body["hosted_version"], "");
+        assert_eq!(body["tool_rule_count"], 2);
+        assert_eq!(body["kill_switch"], true);
+        assert_eq!(body["cua_enabled"], true);
     }
 
     #[tokio::test]

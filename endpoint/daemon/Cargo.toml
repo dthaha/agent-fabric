@@ -25,6 +25,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+pbjson-types.workspace = true
 tower = { version = "0.5", features = ["util"] }
 
 [features]

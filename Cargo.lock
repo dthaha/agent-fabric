@@ -362,6 +362,7 @@ dependencies = [
  "fabric-endpoint-mdm",
  "fabric-policy",
  "fabric-types",
+ "pbjson-types",
  "serde",
  "serde_json",
  "tokio",

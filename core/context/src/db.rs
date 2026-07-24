@@ -128,6 +128,34 @@ impl ContextStore {
         Ok(n as u64)
     }
 
+    /// All sessions in the ACTIVE state, oldest first. Powers the daemon's
+    /// admin endpoints.
+    pub fn list_active_sessions(&self) -> Result<Vec<SessionMeta>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels, org_id
+             FROM sessions WHERE state = ?1 ORDER BY created_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![SessionState::Active as i32], |row| {
+            let labels_json: String = row.get(7)?;
+            Ok(SessionMeta {
+                session_id: row.get(0)?,
+                soul_id: row.get(1)?,
+                user_id: row.get(2)?,
+                state: row.get(3)?,
+                active_lease: row.get(4)?,
+                created_at: Some(ms_to_timestamp(row.get(5)?)),
+                last_activity: Some(ms_to_timestamp(row.get(6)?)),
+                labels: serde_json::from_str(&labels_json).unwrap_or_default(),
+                org_id: row.get(8)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Create a session. Idempotent: re-creating an existing session is a
     /// no-op so offline replicas can converge.
     pub fn create_session(&self, meta: &SessionMeta) -> Result<()> {
@@ -742,6 +770,21 @@ pub(crate) mod tests {
 
         store.suspend("s1").unwrap();
         assert_eq!(store.active_session_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn list_active_sessions_returns_only_active() {
+        let store = ContextStore::open_in_memory().unwrap();
+        assert!(store.list_active_sessions().unwrap().is_empty());
+
+        store.create_session(&test_session("s1")).unwrap();
+        store.create_session(&test_session("s2")).unwrap();
+        store.suspend("s2").unwrap();
+
+        let active = store.list_active_sessions().unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].session_id, "s1");
+        assert_eq!(active[0].state, SessionState::Active as i32);
     }
 
     #[test]
