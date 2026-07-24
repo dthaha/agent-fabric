@@ -313,6 +313,8 @@ dependencies = [
 name = "fabric-classifier"
 version = "0.1.0"
 dependencies = [
+ "fabric-policy",
+ "fabric-types",
  "serde",
  "thiserror",
  "tracing",
@@ -358,6 +360,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "fabric-classifier",
  "fabric-context",
  "fabric-endpoint-mdm",
  "fabric-policy",
@@ -379,6 +382,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "fabric-classifier",
  "fabric-context",
  "reqwest",
  "serde",
