@@ -362,8 +362,9 @@ impl ContextStore {
 
     /// Insert an entry as-is, bypassing lease checks. Used by reconcile and
     /// by replication catch-up, where entries were already validated by the
-    /// writer's locus.
-    pub fn insert_entry_raw(&self, entry: &ContextEntry) -> Result<()> {
+    /// writer's locus. Crate-internal: external writers must use
+    /// [`ContextStore::append_entry`] so the lease is always enforced.
+    pub(crate) fn insert_entry_raw(&self, entry: &ContextEntry) -> Result<()> {
         self.conn.execute(
             "INSERT INTO context_entries
              (session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms)
