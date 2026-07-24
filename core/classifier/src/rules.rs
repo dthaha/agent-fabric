@@ -148,11 +148,211 @@ impl LocusClassifier for RulesClassifier {
     }
 }
 
-fn decision(locus: Locus, reason: impl Into<String>, confidence: f32, fallback: Option<Locus>) -> LocusDecision {
+fn decision(
+    locus: Locus,
+    reason: impl Into<String>,
+    confidence: f32,
+    fallback: Option<Locus>,
+) -> LocusDecision {
     LocusDecision {
         locus,
         reason: reason.into(),
         confidence,
         fallback,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input() -> ClassifyInput {
+        ClassifyInput {
+            intent_text: "summarize my emails".into(),
+            required_tools: vec![],
+            estimated_complexity: Complexity::Low,
+            estimated_horizon: Horizon::SingleTurn,
+            data_classes: vec!["public".into()],
+            network_available: true,
+            local_model_available: true,
+            user_preference: UserLocusPref::NoPreference,
+        }
+    }
+
+    #[test]
+    fn kill_switch_forces_endpoint() {
+        let c = RulesClassifier::with_config(true, vec![], vec![]);
+        let mut i = input();
+        i.user_preference = UserLocusPref::PreferHosted;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 1.0);
+        assert_eq!(d.fallback, None);
+    }
+
+    #[test]
+    fn background_preference_goes_hosted() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.user_preference = UserLocusPref::Background;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.confidence, 0.95);
+        assert_eq!(d.fallback, Some(Locus::Endpoint));
+    }
+
+    #[test]
+    fn prefer_hosted_goes_hosted() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.user_preference = UserLocusPref::PreferHosted;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.confidence, 0.9);
+        assert_eq!(d.fallback, Some(Locus::Endpoint));
+    }
+
+    #[test]
+    fn prefer_local_stays_endpoint() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.user_preference = UserLocusPref::PreferLocal;
+        i.estimated_complexity = Complexity::High;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 0.95);
+    }
+
+    #[test]
+    fn no_network_forces_endpoint_even_when_prefer_hosted() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.network_available = false;
+        i.user_preference = UserLocusPref::PreferHosted;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 1.0);
+        assert_eq!(d.fallback, None);
+    }
+
+    #[test]
+    fn background_without_network_falls_through_to_forced_local() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.network_available = false;
+        i.user_preference = UserLocusPref::Background;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 1.0);
+    }
+
+    #[test]
+    fn restricted_data_class_stays_endpoint() {
+        let c = RulesClassifier::new();
+        for class in ["secret", "restricted", "pii"] {
+            let mut i = input();
+            i.data_classes = vec!["public".into(), class.into()];
+            i.estimated_complexity = Complexity::High;
+            let d = c.classify(&i);
+            assert_eq!(d.locus, Locus::Endpoint, "class {class}");
+            assert_eq!(d.confidence, 0.95);
+            assert!(d.reason.contains(class));
+        }
+    }
+
+    #[test]
+    fn custom_restricted_data_classes() {
+        let c = RulesClassifier::with_config(false, vec!["phi".into()], vec![]);
+        let mut i = input();
+        i.data_classes = vec!["phi".into()];
+        assert_eq!(c.classify(&i).locus, Locus::Endpoint);
+
+        i.data_classes = vec!["secret".into()];
+        assert_eq!(c.classify(&i).locus, Locus::Endpoint); // default input otherwise
+        i.data_classes = vec!["internal".into()];
+        i.estimated_complexity = Complexity::High;
+        assert_eq!(c.classify(&i).locus, Locus::Hosted);
+    }
+
+    #[test]
+    fn endpoint_only_tools_force_endpoint() {
+        let c = RulesClassifier::with_config(
+            false,
+            vec![],
+            vec!["cua.click".into(), "cua.type".into()],
+        );
+        let mut i = input();
+        i.required_tools = vec!["cua.click".into(), "cua.type".into()];
+        i.estimated_horizon = Horizon::LongHorizon;
+        i.estimated_complexity = Complexity::High;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 0.9);
+    }
+
+    #[test]
+    fn mixed_tools_do_not_trigger_endpoint_only_rule() {
+        let c = RulesClassifier::with_config(false, vec![], vec!["cua.click".into()]);
+        let mut i = input();
+        i.required_tools = vec!["cua.click".into(), "email.read".into()];
+        i.estimated_horizon = Horizon::LongHorizon;
+        assert_eq!(c.classify(&i).locus, Locus::Split);
+    }
+
+    #[test]
+    fn long_horizon_with_network_goes_split() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.estimated_horizon = Horizon::LongHorizon;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Split);
+        assert_eq!(d.confidence, 0.85);
+        assert_eq!(d.fallback, Some(Locus::Endpoint));
+    }
+
+    #[test]
+    fn no_local_model_goes_hosted() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.local_model_available = false;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.confidence, 0.8);
+        assert_eq!(d.fallback, Some(Locus::Endpoint));
+    }
+
+    #[test]
+    fn high_complexity_goes_hosted() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.estimated_complexity = Complexity::High;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.confidence, 0.7);
+        assert_eq!(d.fallback, Some(Locus::Endpoint));
+    }
+
+    #[test]
+    fn default_is_endpoint() {
+        let c = RulesClassifier::new();
+        let d = c.classify(&input());
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 0.6);
+        assert_eq!(d.fallback, None);
+    }
+
+    #[test]
+    fn hosted_and_split_decisions_carry_endpoint_fallback() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.user_preference = UserLocusPref::Background;
+        assert_eq!(c.classify(&i).fallback, Some(Locus::Endpoint));
+
+        let mut i = input();
+        i.estimated_horizon = Horizon::LongHorizon;
+        assert_eq!(c.classify(&i).fallback, Some(Locus::Endpoint));
+
+        // Endpoint decisions never need a fallback.
+        assert_eq!(c.classify(&input()).fallback, None);
     }
 }
