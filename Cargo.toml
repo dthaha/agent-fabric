@@ -50,3 +50,4 @@ thiserror = "2"
 uuid = { version = "1", features = ["v7"] }
 anyhow = "1"
 async-trait = "0.1"
+axum = "0.8"

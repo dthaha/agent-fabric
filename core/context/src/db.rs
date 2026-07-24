@@ -102,6 +102,22 @@ impl ContextStore {
 
     // ---- sessions ----
 
+    /// Lightweight liveness check for health/readiness probes.
+    pub fn ping(&self) -> Result<()> {
+        self.conn.query_row("SELECT 1", [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    /// Number of sessions in the ACTIVE state.
+    pub fn active_session_count(&self) -> Result<u64> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM sessions WHERE state = ?1",
+            params![SessionState::Active as i32],
+            |row| row.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
     /// Create a session. Idempotent: re-creating an existing session is a
     /// no-op so offline replicas can converge.
     pub fn create_session(&self, meta: &SessionMeta) -> Result<()> {
@@ -686,6 +702,20 @@ pub(crate) mod tests {
             locus: Locus::Endpoint as i32,
             created_at: None,
         }
+    }
+
+    #[test]
+    fn ping_and_active_session_count() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.ping().unwrap();
+        assert_eq!(store.active_session_count().unwrap(), 0);
+
+        store.create_session(&test_session("s1")).unwrap();
+        store.create_session(&test_session("s2")).unwrap();
+        assert_eq!(store.active_session_count().unwrap(), 2);
+
+        store.suspend("s1").unwrap();
+        assert_eq!(store.active_session_count().unwrap(), 1);
     }
 
     #[test]
