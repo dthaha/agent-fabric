@@ -165,11 +165,11 @@ mod tests {
         assert_eq!(head[3].kind, EntryKind::HandoffMarker as i32);
         assert_eq!(head[3].lease_holder, "endpoint-1");
 
-        // Old holder can no longer write.
+        // Old holder can no longer write (session is HANDED_OFF until ack).
         let mut stale = test_entry("stale", "s1", "endpoint-1");
         assert!(matches!(
             store.append_entry(&mut stale),
-            Err(StoreError::NotLeaseHolder { .. })
+            Err(StoreError::SessionNotActive { .. })
         ));
 
         // Ack from the new holder reactivates the session.

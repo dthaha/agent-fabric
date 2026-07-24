@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use thiserror::Error;
 use tracing::instrument;
 
-use crate::gen::context::{ContextEntry, SessionMeta};
+use crate::gen::context::{ContextEntry, SessionMeta, SessionState};
 use crate::gen::lease::{Lease, LeaseState, LocusKind};
 
 const SCHEMA: &str = include_str!("schema.sql");
@@ -21,6 +21,8 @@ pub enum StoreError {
     LeaseNotFound(String),
     #[error("no active lease for session: {0}")]
     NoActiveLease(String),
+    #[error("session {session_id} is not ACTIVE (state = {state}); appends rejected")]
+    SessionNotActive { session_id: String, state: String },
     #[error("an active lease already exists for session: {0}")]
     LeaseConflict(String),
     #[error("writer '{writer}' does not hold the active lease (held by '{holder}')")]
@@ -332,10 +334,18 @@ impl ContextStore {
 
     // ---- op-log ----
 
-    /// Append an entry to the op-log. Assigns the next sequence number and
-    /// enforces the write lease. Returns the assigned seq.
+    /// Append an entry to the op-log. Assigns the next sequence number,
+    /// enforces that the session is ACTIVE, and enforces the write lease.
+    /// Returns the assigned seq.
     #[instrument(skip(self, entry), fields(session = %entry.session_id))]
     pub fn append_entry(&self, entry: &mut ContextEntry) -> Result<u64> {
+        let session = self.session(&entry.session_id)?;
+        if session.state != SessionState::Active as i32 {
+            return Err(StoreError::SessionNotActive {
+                session_id: entry.session_id.clone(),
+                state: session_state_name(session.state),
+            });
+        }
         self.verify_writer(&entry.session_id, &entry.lease_holder)?;
         let seq = self.head_seq(&entry.session_id)? + 1;
         entry.seq = seq;
@@ -437,6 +447,12 @@ impl ContextStore {
         }
         Ok(())
     }
+}
+
+pub(crate) fn session_state_name(state: i32) -> String {
+    SessionState::try_from(state)
+        .map(|s| s.as_str_name().to_string())
+        .unwrap_or_else(|_| format!("UNKNOWN({state})"))
 }
 
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextEntry> {
@@ -582,6 +598,48 @@ pub(crate) mod tests {
         assert!(matches!(err, StoreError::NotLeaseHolder { .. }));
         // The lease is still active.
         assert!(store.active_lease("s1").unwrap().is_some());
+    }
+
+    #[test]
+    fn append_rejects_non_active_sessions() {
+        for state in [
+            SessionState::HandedOff,
+            SessionState::Completed,
+            SessionState::Archived,
+            SessionState::Suspended,
+        ] {
+            let store = ContextStore::open_in_memory().unwrap();
+            store.create_session(&test_session("s1")).unwrap();
+            store
+                .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+                .unwrap();
+            store.set_session_state("s1", state as i32).unwrap();
+
+            let mut e = test_entry("e1", "s1", "endpoint-1");
+            let err = store.append_entry(&mut e).unwrap_err();
+            assert!(
+                matches!(err, StoreError::SessionNotActive { .. }),
+                "state {state:?} must reject appends: {err}"
+            );
+            assert_eq!(store.head_seq("s1").unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn release_keeps_session_active_without_writer() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        store.append_entry(&mut e1).unwrap();
+        store.release_lease("s1", "endpoint-1").unwrap();
+
+        // Session stays ACTIVE, just without a writer.
+        let session = store.session("s1").unwrap();
+        assert_eq!(session.state, SessionState::Active as i32);
+        assert_eq!(session.active_lease, "");
     }
 
     #[test]
