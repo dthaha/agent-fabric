@@ -153,6 +153,27 @@ impl PolicyGate {
         Decision::Allow
     }
 
+    /// Gate session lifecycle against the hosted session limits. Zero on
+    /// either limit means unlimited.
+    pub fn check_session_limits(&self, session_age_hours: f64, active_sessions: u32) -> Decision {
+        if self.is_killed() {
+            return Decision::Deny("kill switch engaged".into());
+        }
+        let max_hours = self.effective.max_session_duration_hours;
+        if max_hours > 0 && session_age_hours >= f64::from(max_hours) {
+            return Decision::Deny(format!(
+                "session age {session_age_hours:.1}h exceeds limit of {max_hours}h"
+            ));
+        }
+        let max_sessions = self.effective.max_concurrent_sessions;
+        if max_sessions > 0 && active_sessions >= max_sessions {
+            return Decision::Deny(format!(
+                "concurrent session limit {max_sessions} reached"
+            ));
+        }
+        Decision::Allow
+    }
+
     /// The context-token cap for a model, if a rule matches.
     pub fn max_context_tokens(&self, model_id: &str) -> Option<u32> {
         self.effective
@@ -595,6 +616,28 @@ mod tests {
     fn no_background_quota_allows() {
         let g = gate(vec![]);
         assert!(g.check_background_quota(1000, 1000, false).is_allowed());
+    }
+
+    #[test]
+    fn session_limits_enforced() {
+        let mut eff = gate(vec![]).effective().clone();
+        eff.max_session_duration_hours = 24;
+        eff.max_concurrent_sessions = 4;
+        let g = PolicyGate::new(eff);
+
+        // Over duration.
+        assert!(matches!(g.check_session_limits(24.0, 0), Decision::Deny(_)));
+        assert!(matches!(g.check_session_limits(25.5, 0), Decision::Deny(_)));
+        // Over concurrent sessions.
+        assert!(matches!(g.check_session_limits(1.0, 4), Decision::Deny(_)));
+        // Within limits.
+        assert!(g.check_session_limits(23.9, 3).is_allowed());
+    }
+
+    #[test]
+    fn zero_session_limits_are_unlimited() {
+        let g = gate(vec![]);
+        assert!(g.check_session_limits(9999.0, 9999).is_allowed());
     }
 
     #[test]
