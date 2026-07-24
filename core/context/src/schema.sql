@@ -10,8 +10,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     active_lease     TEXT NOT NULL DEFAULT '',
     created_at_ms    INTEGER NOT NULL,
     last_activity_ms INTEGER NOT NULL,
-    labels           TEXT NOT NULL DEFAULT '{}'
+    labels           TEXT NOT NULL DEFAULT '{}',
+    org_id           TEXT NOT NULL DEFAULT ''
 );
+
+CREATE INDEX IF NOT EXISTS idx_sessions_org_id
+    ON sessions(org_id);
 
 CREATE TABLE IF NOT EXISTS context_entries (
     session_id     TEXT NOT NULL,

@@ -447,6 +447,9 @@ impl serde::Serialize for SessionMeta {
         if !self.labels.is_empty() {
             len += 1;
         }
+        if !self.org_id.is_empty() {
+            len += 1;
+        }
         let mut struct_ser = serializer.serialize_struct("fabric.context.SessionMeta", len)?;
         if !self.session_id.is_empty() {
             struct_ser.serialize_field("sessionId", &self.session_id)?;
@@ -474,6 +477,9 @@ impl serde::Serialize for SessionMeta {
         if !self.labels.is_empty() {
             struct_ser.serialize_field("labels", &self.labels)?;
         }
+        if !self.org_id.is_empty() {
+            struct_ser.serialize_field("orgId", &self.org_id)?;
+        }
         struct_ser.end()
     }
 }
@@ -498,6 +504,8 @@ impl<'de> serde::Deserialize<'de> for SessionMeta {
             "last_activity",
             "lastActivity",
             "labels",
+            "org_id",
+            "orgId",
         ];
 
         #[allow(clippy::enum_variant_names)]
@@ -510,6 +518,7 @@ impl<'de> serde::Deserialize<'de> for SessionMeta {
             CreatedAt,
             LastActivity,
             Labels,
+            OrgId,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
             fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
@@ -539,6 +548,7 @@ impl<'de> serde::Deserialize<'de> for SessionMeta {
                             "createdAt" | "created_at" => Ok(GeneratedField::CreatedAt),
                             "lastActivity" | "last_activity" => Ok(GeneratedField::LastActivity),
                             "labels" => Ok(GeneratedField::Labels),
+                            "orgId" | "org_id" => Ok(GeneratedField::OrgId),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
                     }
@@ -566,6 +576,7 @@ impl<'de> serde::Deserialize<'de> for SessionMeta {
                 let mut created_at__ = None;
                 let mut last_activity__ = None;
                 let mut labels__ = None;
+                let mut org_id__ = None;
                 while let Some(k) = map_.next_key()? {
                     match k {
                         GeneratedField::SessionId => {
@@ -618,6 +629,12 @@ impl<'de> serde::Deserialize<'de> for SessionMeta {
                                 map_.next_value::<std::collections::HashMap<_, _>>()?
                             );
                         }
+                        GeneratedField::OrgId => {
+                            if org_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("orgId"));
+                            }
+                            org_id__ = Some(map_.next_value()?);
+                        }
                     }
                 }
                 Ok(SessionMeta {
@@ -629,6 +646,7 @@ impl<'de> serde::Deserialize<'de> for SessionMeta {
                     created_at: created_at__,
                     last_activity: last_activity__,
                     labels: labels__.unwrap_or_default(),
+                    org_id: org_id__.unwrap_or_default(),
                 })
             }
         }

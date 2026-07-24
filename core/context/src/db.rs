@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use thiserror::Error;
 use tracing::instrument;
 
-use fabric_types::context::{ContextEntry, SessionMeta, SessionState};
+use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionMeta, SessionState};
 use fabric_types::lease::{Lease, LeaseState, LocusKind};
 
 pub use crate::clock::now_ms;
@@ -82,6 +82,7 @@ impl ContextStore {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self {
             conn,
             clock: MonotonicClock::new(),
@@ -96,8 +97,8 @@ impl ContextStore {
         let labels = serde_json::to_string(&meta.labels)?;
         self.conn.execute(
             "INSERT OR IGNORE INTO sessions
-             (session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels, org_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 meta.session_id,
                 meta.soul_id,
@@ -107,6 +108,7 @@ impl ContextStore {
                 timestamp_to_ms(meta.created_at.as_ref()),
                 timestamp_to_ms(meta.last_activity.as_ref()),
                 labels,
+                meta.org_id,
             ],
         )?;
         Ok(())
@@ -115,7 +117,7 @@ impl ContextStore {
     pub fn session(&self, session_id: &str) -> Result<SessionMeta> {
         self.conn
             .query_row(
-                "SELECT session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels
+                "SELECT session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels, org_id
                  FROM sessions WHERE session_id = ?1",
                 params![session_id],
                 |row| {
@@ -129,6 +131,7 @@ impl ContextStore {
                         created_at: Some(ms_to_timestamp(row.get(5)?)),
                         last_activity: Some(ms_to_timestamp(row.get(6)?)),
                         labels: serde_json::from_str(&labels_json).unwrap_or_default(),
+                        org_id: row.get(8)?,
                     })
                 },
             )
@@ -213,6 +216,54 @@ impl ContextStore {
             params![now_ms(), session_id],
         )?;
         Ok(())
+    }
+
+    /// Revoke the session's active lease. This is the admin kill-switch: it
+    /// does NOT require the caller to be the lease holder. The lease is
+    /// marked REVOKED, the session's active lease is cleared, and a
+    /// SYSTEM_EVENT recording the revocation (with `reason`) is appended to
+    /// the op-log. Further appends fail until a new lease is acquired.
+    pub fn revoke_lease(&self, session_id: &str, reason: &str) -> Result<Lease> {
+        let lease = self
+            .active_lease(session_id)?
+            .ok_or_else(|| StoreError::NoActiveLease(session_id.to_string()))?;
+        self.set_lease_state(&lease.lease_id, LeaseState::Revoked)?;
+        self.conn.execute(
+            "UPDATE sessions SET active_lease = '', last_activity_ms = ?1 WHERE session_id = ?2",
+            params![now_ms(), session_id],
+        )?;
+
+        // Record the revocation in the op-log itself, bypassing the lease
+        // gate: the revoked holder must not be able to suppress the event.
+        let event = ContextEntry {
+            entry_id: format!("revoke-{}", uuid::Uuid::now_v7()),
+            session_id: session_id.to_string(),
+            seq: self.head_seq(session_id)? + 1,
+            kind: EntryKind::SystemEvent as i32,
+            payload: reason.as_bytes().to_vec(),
+            lease_holder: "system".to_string(),
+            policy_version: String::new(),
+            locus: Locus::Unspecified as i32,
+            created_at: Some(ms_to_timestamp(self.clock.tick())),
+        };
+        self.insert_entry_raw(&event)?;
+        Ok(lease)
+    }
+
+    /// Revoke every active lease on sessions owned by `org_id`. Org-scoped
+    /// kill-switch for enterprise admin. Returns the revoked leases.
+    pub fn revoke_all(&self, org_id: &str) -> Result<Vec<Lease>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT session_id FROM sessions WHERE org_id = ?1 AND active_lease != ''")?;
+        let session_ids = stmt
+            .query_map(params![org_id], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut revoked = Vec::with_capacity(session_ids.len());
+        for session_id in session_ids {
+            revoked.push(self.revoke_lease(&session_id, "org-wide lease revocation")?);
+        }
+        Ok(revoked)
     }
 
     /// Grant a new lease. Fails if the session already has an ACTIVE lease —
@@ -456,6 +507,22 @@ pub(crate) fn session_state_name(state: i32) -> String {
         .unwrap_or_else(|_| format!("UNKNOWN({state})"))
 }
 
+/// Additive schema migrations for stores created by older builds. New
+/// columns are added to schema.sql's CREATE TABLE for fresh stores; here we
+/// only backfill columns that predate the current schema.
+fn migrate(conn: &Connection) -> Result<()> {
+    let has_org_id: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'org_id'")?
+        .exists([])?;
+    if !has_org_id {
+        conn.execute(
+            "ALTER TABLE sessions ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextEntry> {
     Ok(ContextEntry {
         session_id: row.get(0)?,
@@ -486,6 +553,7 @@ pub(crate) mod tests {
             created_at: Some(ms_to_timestamp(now_ms())),
             last_activity: Some(ms_to_timestamp(now_ms())),
             labels: Default::default(),
+            org_id: String::new(),
         }
     }
 
@@ -641,6 +709,70 @@ pub(crate) mod tests {
         let session = store.session("s1").unwrap();
         assert_eq!(session.state, SessionState::Active as i32);
         assert_eq!(session.active_lease, "");
+    }
+
+    #[test]
+    fn revoke_lease_blocks_appends_and_logs_event() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        let lease = store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        store.append_entry(&mut e1).unwrap();
+
+        // Admin kill-switch: caller is not the lease holder.
+        let revoked = store.revoke_lease("s1", "policy violation").unwrap();
+        assert_eq!(revoked.lease_id, lease.lease_id);
+        assert_eq!(
+            store.lease(&lease.lease_id).unwrap().state,
+            LeaseState::Revoked as i32
+        );
+        assert!(store.active_lease("s1").unwrap().is_none());
+
+        // The former holder can no longer append.
+        let mut e2 = test_entry("e2", "s1", "endpoint-1");
+        assert!(matches!(
+            store.append_entry(&mut e2),
+            Err(StoreError::NoActiveLease(_))
+        ));
+
+        // The revocation is recorded in the op-log as a SYSTEM_EVENT.
+        let log = store.entries_since("s1", 0).unwrap();
+        let event = log.last().unwrap();
+        assert_eq!(event.kind, EntryKind::SystemEvent as i32);
+        assert_eq!(event.payload, b"policy violation");
+        assert_eq!(event.seq, 2);
+
+        // Revoking again fails: there is no active lease.
+        assert!(matches!(
+            store.revoke_lease("s1", "again"),
+            Err(StoreError::NoActiveLease(_))
+        ));
+    }
+
+    #[test]
+    fn revoke_all_revokes_every_active_lease_in_org() {
+        let store = ContextStore::open_in_memory().unwrap();
+        for (sid, org) in [("s1", "org-1"), ("s2", "org-1"), ("s3", "org-2")] {
+            let mut meta = test_session(sid);
+            meta.org_id = org.into();
+            store.create_session(&meta).unwrap();
+            store
+                .acquire_lease(sid, "endpoint-1", LocusKind::Endpoint, 30_000)
+                .unwrap();
+        }
+        // s4 is in org-1 but has no active lease: must be skipped.
+        let mut meta = test_session("s4");
+        meta.org_id = "org-1".into();
+        store.create_session(&meta).unwrap();
+
+        let revoked = store.revoke_all("org-1").unwrap();
+        assert_eq!(revoked.len(), 2);
+        assert!(store.active_lease("s1").unwrap().is_none());
+        assert!(store.active_lease("s2").unwrap().is_none());
+        // Other org untouched.
+        assert!(store.active_lease("s3").unwrap().is_some());
     }
 
     #[test]

@@ -44,6 +44,9 @@ pub struct SessionMeta {
     pub last_activity: ::core::option::Option<::pbjson_types::Timestamp>,
     #[prost(map="string, string", tag="8")]
     pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Owning organization. Used by org-scoped admin actions (revoke_all).
+    #[prost(string, tag="9")]
+    pub org_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
