@@ -151,7 +151,8 @@ impl PolicyGate {
         let Some(quota) = &self.effective.background_quota else {
             return Decision::Allow;
         };
-        if quota.max_concurrent_background > 0 && active_background >= quota.max_concurrent_background
+        if quota.max_concurrent_background > 0
+            && active_background >= quota.max_concurrent_background
         {
             return Decision::Deny(format!(
                 "background concurrency limit {} reached",
@@ -184,9 +185,7 @@ impl PolicyGate {
         }
         let max_sessions = self.effective.max_concurrent_sessions;
         if max_sessions > 0 && active_sessions >= max_sessions {
-            return Decision::Deny(format!(
-                "concurrent session limit {max_sessions} reached"
-            ));
+            return Decision::Deny(format!("concurrent session limit {max_sessions} reached"));
         }
         Decision::Allow
     }
@@ -690,7 +689,11 @@ mod tests {
         };
 
         // locus=endpoint: allows on endpoint, skipped (deny, fail closed) on hosted.
-        let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "locus=endpoint")]);
+        let g = gate(vec![cond_rule(
+            "shell.*",
+            ToolAction::Allow,
+            "locus=endpoint",
+        )]);
         assert!(g
             .check_tool_with_context("shell.exec", "endpoint", 12)
             .is_allowed());
@@ -713,7 +716,9 @@ mod tests {
         let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "")]);
         for locus in ["endpoint", "hosted"] {
             for hour in [0, 12, 23] {
-                assert!(g.check_tool_with_context("shell.exec", locus, hour).is_allowed());
+                assert!(g
+                    .check_tool_with_context("shell.exec", locus, hour)
+                    .is_allowed());
             }
         }
 
@@ -736,11 +741,19 @@ mod tests {
         ));
 
         // check_tool ignores conditions (backward compat).
-        let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "locus=hosted")]);
+        let g = gate(vec![cond_rule(
+            "shell.*",
+            ToolAction::Allow,
+            "locus=hosted",
+        )]);
         assert!(g.check_tool("shell.exec").is_allowed());
 
         // Unknown condition keys never match.
-        let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "weather=sunny")]);
+        let g = gate(vec![cond_rule(
+            "shell.*",
+            ToolAction::Allow,
+            "weather=sunny",
+        )]);
         assert!(matches!(
             g.check_tool_with_context("shell.exec", "endpoint", 12),
             Decision::Deny(_)

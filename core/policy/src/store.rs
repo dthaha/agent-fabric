@@ -229,7 +229,8 @@ mod tests {
         hp.max_concurrent_sessions = 7;
         store.load_hosted(hp);
 
-        let path = std::env::temp_dir().join(format!("fabric-policy-store-{}.json", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("fabric-policy-store-{}.json", std::process::id()));
         store.save(&path).unwrap();
         let loaded = PolicyStore::load(&path).unwrap();
         std::fs::remove_file(&path).ok();
@@ -241,7 +242,10 @@ mod tests {
         let gate = loaded.gate();
         assert!(matches!(gate.check_tool("shell.exec"), Decision::Deny(_)));
         assert!(gate.check_tool("shell.list").is_allowed());
-        assert!(matches!(gate.check_session_limits(0.0, 7), Decision::Deny(_)));
+        assert!(matches!(
+            gate.check_session_limits(0.0, 7),
+            Decision::Deny(_)
+        ));
         let out = gate.scan_dlp("ssn 123-45-6789").unwrap();
         assert!(out.redacted_content.contains("[REDACTED:ssn]"));
     }
@@ -253,7 +257,8 @@ mod tests {
     }
 
     #[test]
-    fn gate_reflects_endpoint_dlp_patterns() {        let mut store = PolicyStore::new();
+    fn gate_reflects_endpoint_dlp_patterns() {
+        let mut store = PolicyStore::new();
         let mut ep = endpoint("v1", vec![]);
         ep.dlp_patterns = vec![fabric_types::policy::DlpPattern {
             name: "ssn".into(),
