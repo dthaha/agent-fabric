@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package fabric.catalog;
+
+// A logical model in the unified catalog. Variants bind it to per-OS
+// runtimes (MLX mac, ONNX win, llama.cpp linux).
+message LogicalModel {
+  string model_id = 1;
+  string version = 2;
+  repeated string capabilities = 3;
+  uint32 context_window = 4;
+  string license = 5;
+  repeated ModelVariant variants = 6;
+  ToolSupport tool_support = 7;
+  QualityTier quality_tier = 8;
+}
+
+enum ToolSupport {
+  TOOL_SUPPORT_UNSPECIFIED = 0;
+  TOOL_SUPPORT_FULL = 1;
+  TOOL_SUPPORT_WEAK = 2;
+  TOOL_SUPPORT_NONE = 3;
+}
+
+enum QualityTier {
+  QUALITY_TIER_UNSPECIFIED = 0;
+  QUALITY_TIER_STANDARD = 1;
+  QUALITY_TIER_REDUCED = 2;
+}
+
+message ModelVariant {
+  string variant_id = 1;
+  Runtime runtime = 2;
+  string arch = 3;
+  string format = 4;
+  string quant = 5;
+  string uri = 6;
+  string sha256 = 7;
+  uint64 size_bytes = 8;
+  uint32 min_ram_gb = 9;
+  repeated string execution_providers = 10;
+}
+
+enum Runtime {
+  RUNTIME_UNSPECIFIED = 0;
+  RUNTIME_MLX = 1;
+  RUNTIME_ONNX = 2;
+  RUNTIME_LLAMA_CPP = 3;
+}
+
+// A bundle of logical models seeded to a class of devices within a disk
+// budget.
+message ModelPack {
+  string pack_id = 1;
+  string name = 2;
+  repeated string logical_model_ids = 3;
+  uint32 disk_budget_mb = 4;
+  repeated string device_classes = 5;
+  repeated string org_groups = 6;
+  bool includes_classifier = 7;
+}
+
+// What is actually seeded on a given device.
+message SeedingState {
+  string device_id = 1;
+  repeated InstalledModel models = 2;
+  uint64 disk_used_bytes = 3;
+  uint64 disk_budget_bytes = 4;
+}
+
+message InstalledModel {
+  string model_id = 1;
+  string variant_id = 2;
+  string version = 3;
+  InstallStatus status = 4;
+  bool sha256_verified = 5;
+}
+
+enum InstallStatus {
+  INSTALL_STATUS_UNSPECIFIED = 0;
+  INSTALL_STATUS_PENDING = 1;
+  INSTALL_STATUS_DOWNLOADING = 2;
+  INSTALL_STATUS_VERIFYING = 3;
+  INSTALL_STATUS_ACTIVE = 4;
+  INSTALL_STATUS_RETIRED = 5;
+  INSTALL_STATUS_FAILED = 6;
+}

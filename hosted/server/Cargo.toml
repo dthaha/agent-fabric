@@ -1,0 +1,27 @@
+[package]
+name = "fabric-hosted"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fabric-context = { path = "../../core/context" }
+fabric-policy = { path = "../../core/policy" }
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[features]
+default = ["core"]
+core = []
+enterprise = ["mdm-intune", "mdm-jamf", "audit-siem", "ha-failover", "private-registry"]
+mdm-intune = []
+mdm-jamf = []
+audit-siem = []
+ha-failover = []
+private-registry = []

@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package fabric.tools;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// A tool invocation. All tool calls go through the policy gate; the request
+// carries the lease id of the writer that issued it.
+message ToolRequest {
+  string request_id = 1;
+  string session_id = 2;
+  string lease_id = 3;
+  string tool_name = 4;
+  google.protobuf.Struct params = 5;
+  string policy_version = 6;
+  google.protobuf.Timestamp requested_at = 7;
+}
+
+message ToolResponse {
+  string request_id = 1;
+  bool success = 2;
+  google.protobuf.Struct result = 3;
+  string error = 4;
+  bytes screenshot = 5;
+  string screenshot_mime = 6;
+  google.protobuf.Timestamp completed_at = 7;
+  string executed_on = 8;
+}
+
+message ToolDescriptor {
+  string tool_name = 1;
+  string description = 2;
+  google.protobuf.Struct input_schema = 3;
+  ToolLocality locality = 4;
+  repeated string required_permissions = 5;
+}
+
+enum ToolLocality {
+  TOOL_LOCALITY_UNSPECIFIED = 0;
+  TOOL_LOCALITY_ENDPOINT_ONLY = 1;
+  TOOL_LOCALITY_HOSTED_OK = 2;
+  TOOL_LOCALITY_EITHER = 3;
+}
+
+// CUA (computer-use actuator) capture request. The actuator stays on the
+// endpoint; a hosted brain reaches it via the authenticated tool bridge.
+message CuaCaptureRequest {
+  string app = 1;
+  CaptureMode mode = 2;
+}
+
+enum CaptureMode {
+  CAPTURE_MODE_UNSPECIFIED = 0;
+  CAPTURE_MODE_SOM = 1;
+  CAPTURE_MODE_VISION = 2;
+  CAPTURE_MODE_AX = 3;
+}
+
+message CuaActionRequest {
+  CuaActionType action = 1;
+  string element = 2;
+  string coordinate = 3;
+  string text = 4;
+  repeated string keys = 5;
+  bool capture_after = 6;
+}
+
+enum CuaActionType {
+  CUA_ACTION_TYPE_UNSPECIFIED = 0;
+  CUA_ACTION_TYPE_CLICK = 1;
+  CUA_ACTION_TYPE_DOUBLE_CLICK = 2;
+  CUA_ACTION_TYPE_RIGHT_CLICK = 3;
+  CUA_ACTION_TYPE_TYPE = 4;
+  CUA_ACTION_TYPE_KEY = 5;
+  CUA_ACTION_TYPE_SCROLL = 6;
+  CUA_ACTION_TYPE_DRAG = 7;
+  CUA_ACTION_TYPE_WAIT = 8;
+  CUA_ACTION_TYPE_FOCUS_APP = 9;
+  CUA_ACTION_TYPE_LIST_APPS = 10;
+}

@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package fabric.policy;
+
+// Endpoint policy: the MDM-shipped ceiling. The endpoint can tighten, never
+// loosen. Merged with the hosted policy using deny-wins semantics.
+message EndpointPolicy {
+  string policy_id = 1;
+  string version = 2;
+  string org_id = 3;
+  repeated DataClassRule data_rules = 4;
+  repeated ToolRule tool_rules = 5;
+  repeated ModelRule model_rules = 6;
+  CuaPolicy cua = 7;
+  bool kill_switch = 8;
+  uint32 max_retention_hours = 9;
+  repeated DlpPattern dlp_patterns = 10;
+}
+
+// Hosted policy: additive rules applied by the hosted runtime. Never loosens
+// the endpoint ceiling.
+message HostedPolicy {
+  string policy_id = 1;
+  string version = 2;
+  string org_id = 3;
+  repeated InferenceRule inference_rules = 4;
+  BackgroundQuota background_quota = 5;
+  repeated ToolRule tool_restrictions = 6;
+  uint32 max_session_duration_hours = 7;
+  uint32 max_concurrent_sessions = 8;
+}
+
+message DataClassRule {
+  string data_class = 1;
+  bool may_leave_device = 2;
+  bool requires_redaction = 3;
+  repeated string allowed_destinations = 4;
+}
+
+message ToolRule {
+  string tool_pattern = 1;
+  ToolAction action = 2;
+  string condition = 3;
+}
+
+enum ToolAction {
+  TOOL_ACTION_UNSPECIFIED = 0;
+  TOOL_ACTION_ALLOW = 1;
+  TOOL_ACTION_DENY = 2;
+  TOOL_ACTION_REQUIRE_APPROVAL = 3;
+}
+
+message ModelRule {
+  string model_pattern = 1;
+  bool allowed_local = 2;
+  bool allowed_hosted = 3;
+  uint32 max_context_tokens = 4;
+}
+
+message CuaPolicy {
+  bool enabled = 1;
+  repeated string allowed_apps = 2;
+  repeated string denied_apps = 3;
+  bool screenshot_redaction = 4;
+  bool require_confirmation_destructive = 5;
+  uint32 max_actions_per_minute = 6;
+}
+
+message DlpPattern {
+  string name = 1;
+  string regex = 2;
+  DlpAction action = 3;
+}
+
+enum DlpAction {
+  DLP_ACTION_UNSPECIFIED = 0;
+  DLP_ACTION_REDACT = 1;
+  DLP_ACTION_BLOCK = 2;
+  DLP_ACTION_LOG_ONLY = 3;
+}
+
+message InferenceRule {
+  string provider = 1;
+  repeated string allowed_models = 2;
+  repeated string allowed_regions = 3;
+  uint32 max_tokens_per_request = 4;
+  uint64 daily_token_budget = 5;
+}
+
+message BackgroundQuota {
+  uint32 max_concurrent_background = 1;
+  uint32 max_daily_hosted_turns = 2;
+  bool require_user_consent = 3;
+}
+
+// The merged result of endpoint + hosted policy. Computed by the dual policy
+// engine with deny-wins semantics; this is what the eval gate consumes.
+message EffectivePolicy {
+  string endpoint_version = 1;
+  string hosted_version = 2;
+  repeated DataClassRule data_rules = 3;
+  repeated ToolRule tool_rules = 4;
+  repeated ModelRule model_rules = 5;
+  CuaPolicy cua = 6;
+  repeated InferenceRule inference_rules = 7;
+  bool kill_switch = 8;
+  uint32 max_retention_hours = 9;
+}

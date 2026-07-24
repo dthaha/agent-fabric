@@ -1,0 +1,9 @@
+//! Policy plane: dual policy engine. Merges the endpoint (MDM) ceiling with
+//! the hosted additive policy using deny-wins semantics, and gates every
+//! tool call, model choice, inference request, data egress, and CUA action.
+
+pub mod eval;
+pub mod merge;
+
+pub use eval::{Decision, DlpOutcome, EvalError, ModelLocus, PolicyGate};
+pub use merge::merge;

@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package fabric.context;
+
+import "google/protobuf/timestamp.proto";
+
+// A single immutable entry in the session op-log. The context plane is the
+// spine: entries are appended by the current lease holder only.
+message ContextEntry {
+  string entry_id = 1;
+  string session_id = 2;
+  uint64 seq = 3;
+  EntryKind kind = 4;
+  bytes payload = 5;
+  string lease_holder = 6;
+  string policy_version = 7;
+  Locus locus = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+enum EntryKind {
+  ENTRY_KIND_UNSPECIFIED = 0;
+  ENTRY_KIND_USER_MESSAGE = 1;
+  ENTRY_KIND_ASSISTANT_MESSAGE = 2;
+  ENTRY_KIND_TOOL_CALL = 3;
+  ENTRY_KIND_TOOL_RESULT = 4;
+  ENTRY_KIND_SYSTEM_EVENT = 5;
+  ENTRY_KIND_GOAL_UPDATE = 6;
+  ENTRY_KIND_PLAN_STEP = 7;
+  ENTRY_KIND_HANDOFF_MARKER = 8;
+  ENTRY_KIND_DEFERRED_INTENT = 9;
+}
+
+enum Locus {
+  LOCUS_UNSPECIFIED = 0;
+  LOCUS_ENDPOINT = 1;
+  LOCUS_HOSTED = 2;
+  LOCUS_SPLIT = 3;
+}
+
+// Metadata for a session whose op-log lives in the context plane.
+message SessionMeta {
+  string session_id = 1;
+  string soul_id = 2;
+  string user_id = 3;
+  SessionState state = 4;
+  string active_lease = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_activity = 7;
+  map<string, string> labels = 8;
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_ACTIVE = 1;
+  SESSION_STATE_SUSPENDED = 2;
+  SESSION_STATE_HANDED_OFF = 3;
+  SESSION_STATE_COMPLETED = 4;
+  SESSION_STATE_ARCHIVED = 5;
+}

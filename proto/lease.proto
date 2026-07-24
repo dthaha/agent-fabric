@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package fabric.lease;
+
+import "google/protobuf/timestamp.proto";
+
+// A write lease on a session's context op-log. Exactly one ACTIVE lease per
+// session at any time; the holder is the single writer.
+message Lease {
+  string lease_id = 1;
+  string session_id = 2;
+  string holder_id = 3;
+  LocusKind locus = 4;
+  uint64 granted_seq = 5;
+  google.protobuf.Timestamp granted_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  LeaseState state = 8;
+}
+
+enum LocusKind {
+  LOCUS_KIND_UNSPECIFIED = 0;
+  LOCUS_KIND_ENDPOINT = 1;
+  LOCUS_KIND_HOSTED = 2;
+  LOCUS_KIND_SPLIT = 3;
+}
+
+enum LeaseState {
+  LEASE_STATE_UNSPECIFIED = 0;
+  LEASE_STATE_ACTIVE = 1;
+  LEASE_STATE_EXPIRED = 2;
+  LEASE_STATE_REVOKED = 3;
+  LEASE_STATE_TRANSFERRED = 4;
+}
+
+// Request to transfer the write lease from one holder to another. Handoff is
+// lease transfer + catch-up, never summarize-and-restart.
+message HandoffRequest {
+  string session_id = 1;
+  string from_holder = 2;
+  string to_holder = 3;
+  uint64 freeze_at_seq = 4;
+  string reason = 5;
+}
+
+// Acknowledgement of a handoff. The new holder reports the sequence it has
+// caught up to before it begins writing.
+message HandoffAck {
+  string session_id = 1;
+  string new_holder = 2;
+  uint64 caught_up_to_seq = 3;
+  bool success = 4;
+  string error = 5;
+}
