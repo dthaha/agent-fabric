@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use fabric_types::context::Locus;
 
+pub mod policy;
 pub mod rules;
 
+pub use policy::PolicyAwareClassifier;
 pub use rules::RulesClassifier;
 
 /// Decides where a single agent turn executes. Implementations must run

@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+fabric-policy = { path = "../policy" }
 fabric-types = { path = "../types" }
 serde.workspace = true
 thiserror.workspace = true
