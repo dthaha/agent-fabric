@@ -568,6 +568,7 @@ impl serde::Serialize for LeaseState {
             Self::Expired => "LEASE_STATE_EXPIRED",
             Self::Revoked => "LEASE_STATE_REVOKED",
             Self::Transferred => "LEASE_STATE_TRANSFERRED",
+            Self::Released => "LEASE_STATE_RELEASED",
         };
         serializer.serialize_str(variant)
     }
@@ -584,6 +585,7 @@ impl<'de> serde::Deserialize<'de> for LeaseState {
             "LEASE_STATE_EXPIRED",
             "LEASE_STATE_REVOKED",
             "LEASE_STATE_TRANSFERRED",
+            "LEASE_STATE_RELEASED",
         ];
 
         struct GeneratedVisitor;
@@ -629,6 +631,7 @@ impl<'de> serde::Deserialize<'de> for LeaseState {
                     "LEASE_STATE_EXPIRED" => Ok(LeaseState::Expired),
                     "LEASE_STATE_REVOKED" => Ok(LeaseState::Revoked),
                     "LEASE_STATE_TRANSFERRED" => Ok(LeaseState::Transferred),
+                    "LEASE_STATE_RELEASED" => Ok(LeaseState::Released),
                     _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
                 }
             }

@@ -7,7 +7,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 use crate::gen::context::{ContextEntry, SessionMeta};
-use crate::gen::lease::{Lease, LeaseState};
+use crate::gen::lease::{Lease, LeaseState, LocusKind};
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -147,6 +147,72 @@ impl ContextStore {
 
     // ---- leases ----
 
+    /// Acquire a turn-scoped write lease. Called at the START of an agent
+    /// turn; the holder must call [`ContextStore::release_lease`] when the
+    /// turn completes. `ttl_ms` is a safety net only: if the holder crashes
+    /// without releasing, the lease auto-expires after the TTL and a new
+    /// holder may acquire it.
+    ///
+    /// Fails with [`StoreError::LeaseConflict`] if another holder already
+    /// holds an unexpired ACTIVE lease. An expired ACTIVE lease (crashed
+    /// holder) is marked EXPIRED and superseded.
+    pub fn acquire_lease(
+        &self,
+        session_id: &str,
+        holder_id: &str,
+        locus: LocusKind,
+        ttl_ms: i64,
+    ) -> Result<Lease> {
+        if let Some(existing) = self.active_lease(session_id)? {
+            let expires_ms = timestamp_to_ms(existing.expires_at.as_ref());
+            let expired = expires_ms > 0 && now_ms() >= expires_ms;
+            if !expired {
+                return Err(StoreError::LeaseConflict(session_id.to_string()));
+            }
+            // Crashed holder: the safety-net TTL fired. Retire the stale
+            // lease so a new writer can take over.
+            self.set_lease_state(&existing.lease_id, LeaseState::Expired)?;
+        }
+        let now = now_ms();
+        let lease = Lease {
+            lease_id: format!("lease-{}", uuid::Uuid::now_v7()),
+            session_id: session_id.to_string(),
+            holder_id: holder_id.to_string(),
+            locus: locus as i32,
+            granted_seq: self.head_seq(session_id)?,
+            granted_at: Some(ms_to_timestamp(now)),
+            expires_at: Some(ms_to_timestamp(now + ttl_ms)),
+            state: LeaseState::Active as i32,
+        };
+        self.insert_lease(&lease)?;
+        self.conn.execute(
+            "UPDATE sessions SET active_lease = ?1, last_activity_ms = ?2 WHERE session_id = ?3",
+            params![lease.lease_id, now, session_id],
+        )?;
+        Ok(lease)
+    }
+
+    /// Release the turn-scoped lease at the end of an agent turn. Marks the
+    /// lease RELEASED and clears the session's active lease, leaving the
+    /// session ACTIVE but without a writer until the next acquire.
+    pub fn release_lease(&self, session_id: &str, holder_id: &str) -> Result<()> {
+        let lease = self
+            .active_lease(session_id)?
+            .ok_or_else(|| StoreError::NoActiveLease(session_id.to_string()))?;
+        if lease.holder_id != holder_id {
+            return Err(StoreError::NotLeaseHolder {
+                writer: holder_id.to_string(),
+                holder: lease.holder_id,
+            });
+        }
+        self.set_lease_state(&lease.lease_id, LeaseState::Released)?;
+        self.conn.execute(
+            "UPDATE sessions SET active_lease = '', last_activity_ms = ?1 WHERE session_id = ?2",
+            params![now_ms(), session_id],
+        )?;
+        Ok(())
+    }
+
     /// Grant a new lease. Fails if the session already has an ACTIVE lease —
     /// single writer is enforced here. Use handoff to transfer.
     pub fn grant_lease(&self, lease: &Lease) -> Result<()> {
@@ -226,6 +292,19 @@ impl ContextStore {
         let n = self.conn.execute(
             "UPDATE leases SET state = ?1 WHERE lease_id = ?2",
             params![state as i32, lease_id],
+        )?;
+        if n == 0 {
+            return Err(StoreError::LeaseNotFound(lease_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Set the granted_seq of an existing lease. Used by handoff to pin the
+    /// new holder's lease to the freeze point.
+    pub(crate) fn set_granted_seq(&self, lease_id: &str, granted_seq: u64) -> Result<()> {
+        let n = self.conn.execute(
+            "UPDATE leases SET granted_seq = ?1 WHERE lease_id = ?2",
+            params![granted_seq as i64, lease_id],
         )?;
         if n == 0 {
             return Err(StoreError::LeaseNotFound(lease_id.to_string()));
@@ -418,6 +497,91 @@ pub(crate) mod tests {
             locus: Locus::Endpoint as i32,
             created_at: None,
         }
+    }
+
+    #[test]
+    fn acquire_append_release_cycle() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+
+        // Turn 1: acquire, append, release.
+        let lease = store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        assert_eq!(lease.state, LeaseState::Active as i32);
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        assert_eq!(store.append_entry(&mut e1).unwrap(), 1);
+        store.release_lease("s1", "endpoint-1").unwrap();
+
+        // Lease is RELEASED, session has no active lease.
+        assert_eq!(
+            store.lease(&lease.lease_id).unwrap().state,
+            LeaseState::Released as i32
+        );
+        assert!(store.active_lease("s1").unwrap().is_none());
+
+        // Without a writer, appends fail.
+        let mut e2 = test_entry("e2", "s1", "endpoint-1");
+        assert!(matches!(
+            store.append_entry(&mut e2),
+            Err(StoreError::NoActiveLease(_))
+        ));
+
+        // Turn 2: a fresh acquire succeeds after release.
+        let lease2 = store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        assert_ne!(lease.lease_id, lease2.lease_id);
+        assert_eq!(lease2.granted_seq, 1);
+        let mut e3 = test_entry("e3", "s1", "endpoint-1");
+        assert_eq!(store.append_entry(&mut e3).unwrap(), 2);
+    }
+
+    #[test]
+    fn acquire_during_active_lease_conflicts() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        let err = store
+            .acquire_lease("s1", "hosted-1", LocusKind::Hosted, 30_000)
+            .unwrap_err();
+        assert!(matches!(err, StoreError::LeaseConflict(_)));
+    }
+
+    #[test]
+    fn acquire_after_holder_crash_succeeds_once_expired() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        // Holder crashes mid-turn without releasing; TTL is the safety net.
+        let crashed = store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 0)
+            .unwrap();
+
+        let lease = store
+            .acquire_lease("s1", "hosted-1", LocusKind::Hosted, 30_000)
+            .unwrap();
+        assert_eq!(lease.holder_id, "hosted-1");
+        assert_eq!(
+            store.lease(&crashed.lease_id).unwrap().state,
+            LeaseState::Expired as i32
+        );
+        let mut e1 = test_entry("e1", "s1", "hosted-1");
+        assert_eq!(store.append_entry(&mut e1).unwrap(), 1);
+    }
+
+    #[test]
+    fn release_rejects_non_holder() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        let err = store.release_lease("s1", "mallory").unwrap_err();
+        assert!(matches!(err, StoreError::NotLeaseHolder { .. }));
+        // The lease is still active.
+        assert!(store.active_lease("s1").unwrap().is_some());
     }
 
     #[test]

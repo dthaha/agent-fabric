@@ -94,6 +94,7 @@ pub enum LeaseState {
     Expired = 2,
     Revoked = 3,
     Transferred = 4,
+    Released = 5,
 }
 impl LeaseState {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -107,6 +108,7 @@ impl LeaseState {
             LeaseState::Expired => "LEASE_STATE_EXPIRED",
             LeaseState::Revoked => "LEASE_STATE_REVOKED",
             LeaseState::Transferred => "LEASE_STATE_TRANSFERRED",
+            LeaseState::Released => "LEASE_STATE_RELEASED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -117,6 +119,7 @@ impl LeaseState {
             "LEASE_STATE_EXPIRED" => Some(Self::Expired),
             "LEASE_STATE_REVOKED" => Some(Self::Revoked),
             "LEASE_STATE_TRANSFERRED" => Some(Self::Transferred),
+            "LEASE_STATE_RELEASED" => Some(Self::Released),
             _ => None,
         }
     }

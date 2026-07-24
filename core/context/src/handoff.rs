@@ -6,20 +6,22 @@
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::db::{ms_to_timestamp, now_ms, ContextStore, Result, StoreError};
+use crate::db::{ContextStore, Result, StoreError};
 use crate::gen::context::{ContextEntry, EntryKind, Locus, SessionState};
-use crate::gen::lease::{HandoffAck, HandoffRequest, Lease, LeaseState, LocusKind};
+use crate::gen::lease::{HandoffAck, HandoffRequest, Lease, LocusKind};
 
-/// Default lease TTL handed to the new holder: one hour.
-pub const DEFAULT_LEASE_TTL_MS: i64 = 60 * 60 * 1000;
+/// Safety-net lease TTL handed to a new holder: 30 seconds. Leases are
+/// turn-scoped (acquired at turn start, released at turn end); the TTL only
+/// fires when a holder crashes without releasing.
+pub const DEFAULT_LEASE_TTL_MS: i64 = 30 * 1000;
 
 /// Execute a handoff from the current lease holder to a new holder.
 ///
 /// Steps (atomic in effect; each is idempotent by id):
 /// 1. Verify the requester is the current writer.
 /// 2. Append a HANDOFF_MARKER at the freeze sequence.
-/// 3. Mark the old lease TRANSFERRED.
-/// 4. Grant a new lease to `to_holder` with granted_seq = freeze point.
+/// 3. Release the old lease (the old holder's turn is over).
+/// 4. The new holder acquires a fresh lease with granted_seq = freeze point.
 /// 5. Mark the session HANDED_OFF until the ack arrives.
 ///
 /// Returns the new lease. The new holder then calls [`ack_handoff`] after
@@ -65,21 +67,14 @@ pub fn execute_handoff(
     };
     store.append_entry(&mut marker)?;
 
-    // 2. Transfer the lease.
-    store.set_lease_state(&old_lease.lease_id, LeaseState::Transferred)?;
+    // 2. Transfer the lease: release the old holder's turn-scoped lease,
+    //    then the new holder acquires fresh, pinned to the freeze point.
+    store.release_lease(&request.session_id, &request.from_holder)?;
 
-    let now = now_ms();
-    let new_lease = Lease {
-        lease_id: format!("lease-{}", Uuid::now_v7()),
-        session_id: request.session_id.clone(),
-        holder_id: request.to_holder.clone(),
-        locus: to_locus as i32,
-        granted_seq: freeze_seq,
-        granted_at: Some(ms_to_timestamp(now)),
-        expires_at: Some(ms_to_timestamp(now + ttl_ms)),
-        state: LeaseState::Active as i32,
-    };
-    store.insert_lease(&new_lease)?;
+    let mut new_lease =
+        store.acquire_lease(&request.session_id, &request.to_holder, to_locus, ttl_ms)?;
+    new_lease.granted_seq = freeze_seq;
+    store.set_granted_seq(&new_lease.lease_id, freeze_seq)?;
     store.set_session_state(&request.session_id, SessionState::HandedOff as i32)?;
 
     Ok(new_lease)
@@ -128,6 +123,7 @@ pub fn catch_up(source: &ContextStore, target: &ContextStore, session_id: &str) 
 mod tests {
     use super::*;
     use crate::db::tests::{test_entry, test_lease, test_session};
+    use crate::gen::lease::LeaseState;
 
     fn setup() -> (ContextStore, Lease) {
         let store = ContextStore::open_in_memory().unwrap();
@@ -155,10 +151,10 @@ mod tests {
         let new_lease =
             execute_handoff(&store, &req, LocusKind::Hosted, DEFAULT_LEASE_TTL_MS).unwrap();
 
-        // Old lease transferred, new lease active from the freeze point.
+        // Old lease released, new lease active from the freeze point.
         assert_eq!(
             store.lease(&old.lease_id).unwrap().state,
-            LeaseState::Transferred as i32
+            LeaseState::Released as i32
         );
         assert_eq!(new_lease.holder_id, "hosted-1");
         assert_eq!(new_lease.granted_seq, 3);

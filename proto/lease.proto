@@ -30,6 +30,10 @@ enum LeaseState {
   LEASE_STATE_EXPIRED = 2;
   LEASE_STATE_REVOKED = 3;
   LEASE_STATE_TRANSFERRED = 4;
+  // Released by the holder at the end of a turn. Leases are turn-scoped:
+  // acquired at turn start, released at turn end; the TTL is only a safety
+  // net for crashed holders.
+  LEASE_STATE_RELEASED = 5;
 }
 
 // Request to transfer the write lease from one holder to another. Handoff is
