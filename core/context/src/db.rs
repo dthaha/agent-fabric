@@ -139,7 +139,12 @@ impl ContextStore {
             .ok_or_else(|| StoreError::SessionNotFound(session_id.to_string()))
     }
 
-    pub fn set_session_state(&self, session_id: &str, state: i32) -> Result<()> {
+    /// Raw state setter. Crate-internal: callers outside this module must
+    /// use the validated transitions ([`ContextStore::suspend`],
+    /// [`ContextStore::resume`], [`ContextStore::complete`],
+    /// [`ContextStore::archive`]). Handoff uses this to set HANDED_OFF and
+    /// to return to ACTIVE on ack.
+    pub(crate) fn set_session_state(&self, session_id: &str, state: i32) -> Result<()> {
         let n = self.conn.execute(
             "UPDATE sessions SET state = ?1, last_activity_ms = ?2 WHERE session_id = ?3",
             params![state, now_ms(), session_id],
@@ -148,6 +153,49 @@ impl ContextStore {
             return Err(StoreError::SessionNotFound(session_id.to_string()));
         }
         Ok(())
+    }
+
+    /// Validated lifecycle transition. Fails with
+    /// [`StoreError::InvalidTransition`] unless the session is in `from`.
+    fn transition(&self, session_id: &str, from: SessionState, to: SessionState) -> Result<()> {
+        let current = self.session(session_id)?.state;
+        if current != from as i32 {
+            return Err(StoreError::InvalidTransition(format!(
+                "cannot transition session {session_id} {} -> {}: current state is {}",
+                from.as_str_name(),
+                to.as_str_name(),
+                session_state_name(current),
+            )));
+        }
+        self.set_session_state(session_id, to as i32)
+    }
+
+    /// Suspend an ACTIVE session (e.g. user locked the device). Appends are
+    /// rejected while SUSPENDED.
+    pub fn suspend(&self, session_id: &str) -> Result<()> {
+        self.transition(session_id, SessionState::Active, SessionState::Suspended)
+    }
+
+    /// Resume a SUSPENDED session.
+    pub fn resume(&self, session_id: &str) -> Result<()> {
+        self.transition(session_id, SessionState::Suspended, SessionState::Active)
+    }
+
+    /// Complete an ACTIVE session. The session must have no active lease:
+    /// release (or revoke) the writer's lease first.
+    pub fn complete(&self, session_id: &str) -> Result<()> {
+        if let Some(lease) = self.active_lease(session_id)? {
+            return Err(StoreError::InvalidTransition(format!(
+                "cannot complete session {session_id}: active lease {} held by '{}' must be released first",
+                lease.lease_id, lease.holder_id,
+            )));
+        }
+        self.transition(session_id, SessionState::Active, SessionState::Completed)
+    }
+
+    /// Archive a COMPLETED session. Terminal state.
+    pub fn archive(&self, session_id: &str) -> Result<()> {
+        self.transition(session_id, SessionState::Completed, SessionState::Archived)
     }
 
     // ---- leases ----
@@ -773,6 +821,86 @@ pub(crate) mod tests {
         assert!(store.active_lease("s2").unwrap().is_none());
         // Other org untouched.
         assert!(store.active_lease("s3").unwrap().is_some());
+    }
+
+    #[test]
+    fn lifecycle_happy_path() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+
+        store.suspend("s1").unwrap();
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::Suspended as i32
+        );
+        store.resume("s1").unwrap();
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::Active as i32
+        );
+        store.complete("s1").unwrap();
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::Completed as i32
+        );
+        store.archive("s1").unwrap();
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::Archived as i32
+        );
+    }
+
+    #[test]
+    fn lifecycle_rejects_invalid_transitions() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+
+        // Cannot resume an ACTIVE session.
+        let err = store.resume("s1").unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidTransition(ref m) if m.contains("SESSION_STATE_SUSPENDED -> SESSION_STATE_ACTIVE"))
+        );
+
+        // Cannot archive an ACTIVE session.
+        let err = store.archive("s1").unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidTransition(ref m) if m.contains("SESSION_STATE_COMPLETED -> SESSION_STATE_ARCHIVED"))
+        );
+
+        // Cannot suspend twice.
+        store.suspend("s1").unwrap();
+        let err = store.suspend("s1").unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidTransition(ref m) if m.contains("SESSION_STATE_ACTIVE -> SESSION_STATE_SUSPENDED"))
+        );
+
+        // Cannot complete a SUSPENDED session.
+        let err = store.complete("s1").unwrap_err();
+        assert!(matches!(err, StoreError::InvalidTransition(_)));
+
+        // Unknown session.
+        assert!(matches!(
+            store.suspend("nope"),
+            Err(StoreError::SessionNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn complete_requires_no_active_lease() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+
+        let err = store.complete("s1").unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidTransition(ref m) if m.contains("must be released")),
+            "{err}"
+        );
+
+        store.release_lease("s1", "endpoint-1").unwrap();
+        store.complete("s1").unwrap();
     }
 
     #[test]
