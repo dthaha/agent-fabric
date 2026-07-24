@@ -334,6 +334,9 @@ mod tests {
             inference_rules: vec![],
             kill_switch: false,
             max_retention_hours: 0,
+            background_quota: None,
+            max_session_duration_hours: 0,
+            max_concurrent_sessions: 0,
         })
     }
 

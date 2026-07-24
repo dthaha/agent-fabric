@@ -105,4 +105,7 @@ message EffectivePolicy {
   repeated InferenceRule inference_rules = 7;
   bool kill_switch = 8;
   uint32 max_retention_hours = 9;
+  BackgroundQuota background_quota = 10;
+  uint32 max_session_duration_hours = 11;
+  uint32 max_concurrent_sessions = 12;
 }

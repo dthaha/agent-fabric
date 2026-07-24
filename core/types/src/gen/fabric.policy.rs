@@ -155,6 +155,12 @@ pub struct EffectivePolicy {
     pub kill_switch: bool,
     #[prost(uint32, tag="9")]
     pub max_retention_hours: u32,
+    #[prost(message, optional, tag="10")]
+    pub background_quota: ::core::option::Option<BackgroundQuota>,
+    #[prost(uint32, tag="11")]
+    pub max_session_duration_hours: u32,
+    #[prost(uint32, tag="12")]
+    pub max_concurrent_sessions: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

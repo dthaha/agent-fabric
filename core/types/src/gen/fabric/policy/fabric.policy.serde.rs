@@ -699,6 +699,15 @@ impl serde::Serialize for EffectivePolicy {
         if self.max_retention_hours != 0 {
             len += 1;
         }
+        if self.background_quota.is_some() {
+            len += 1;
+        }
+        if self.max_session_duration_hours != 0 {
+            len += 1;
+        }
+        if self.max_concurrent_sessions != 0 {
+            len += 1;
+        }
         let mut struct_ser = serializer.serialize_struct("fabric.policy.EffectivePolicy", len)?;
         if !self.endpoint_version.is_empty() {
             struct_ser.serialize_field("endpointVersion", &self.endpoint_version)?;
@@ -727,6 +736,15 @@ impl serde::Serialize for EffectivePolicy {
         if self.max_retention_hours != 0 {
             struct_ser.serialize_field("maxRetentionHours", &self.max_retention_hours)?;
         }
+        if let Some(v) = self.background_quota.as_ref() {
+            struct_ser.serialize_field("backgroundQuota", v)?;
+        }
+        if self.max_session_duration_hours != 0 {
+            struct_ser.serialize_field("maxSessionDurationHours", &self.max_session_duration_hours)?;
+        }
+        if self.max_concurrent_sessions != 0 {
+            struct_ser.serialize_field("maxConcurrentSessions", &self.max_concurrent_sessions)?;
+        }
         struct_ser.end()
     }
 }
@@ -754,6 +772,12 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
             "killSwitch",
             "max_retention_hours",
             "maxRetentionHours",
+            "background_quota",
+            "backgroundQuota",
+            "max_session_duration_hours",
+            "maxSessionDurationHours",
+            "max_concurrent_sessions",
+            "maxConcurrentSessions",
         ];
 
         #[allow(clippy::enum_variant_names)]
@@ -767,6 +791,9 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
             InferenceRules,
             KillSwitch,
             MaxRetentionHours,
+            BackgroundQuota,
+            MaxSessionDurationHours,
+            MaxConcurrentSessions,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
             fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
@@ -797,6 +824,9 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
                             "inferenceRules" | "inference_rules" => Ok(GeneratedField::InferenceRules),
                             "killSwitch" | "kill_switch" => Ok(GeneratedField::KillSwitch),
                             "maxRetentionHours" | "max_retention_hours" => Ok(GeneratedField::MaxRetentionHours),
+                            "backgroundQuota" | "background_quota" => Ok(GeneratedField::BackgroundQuota),
+                            "maxSessionDurationHours" | "max_session_duration_hours" => Ok(GeneratedField::MaxSessionDurationHours),
+                            "maxConcurrentSessions" | "max_concurrent_sessions" => Ok(GeneratedField::MaxConcurrentSessions),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
                     }
@@ -825,6 +855,9 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
                 let mut inference_rules__ = None;
                 let mut kill_switch__ = None;
                 let mut max_retention_hours__ = None;
+                let mut background_quota__ = None;
+                let mut max_session_duration_hours__ = None;
+                let mut max_concurrent_sessions__ = None;
                 while let Some(k) = map_.next_key()? {
                     match k {
                         GeneratedField::EndpointVersion => {
@@ -883,6 +916,28 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
                                 Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
                             ;
                         }
+                        GeneratedField::BackgroundQuota => {
+                            if background_quota__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("backgroundQuota"));
+                            }
+                            background_quota__ = map_.next_value()?;
+                        }
+                        GeneratedField::MaxSessionDurationHours => {
+                            if max_session_duration_hours__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("maxSessionDurationHours"));
+                            }
+                            max_session_duration_hours__ = 
+                                Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
+                            ;
+                        }
+                        GeneratedField::MaxConcurrentSessions => {
+                            if max_concurrent_sessions__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("maxConcurrentSessions"));
+                            }
+                            max_concurrent_sessions__ = 
+                                Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
+                            ;
+                        }
                     }
                 }
                 Ok(EffectivePolicy {
@@ -895,6 +950,9 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
                     inference_rules: inference_rules__.unwrap_or_default(),
                     kill_switch: kill_switch__.unwrap_or_default(),
                     max_retention_hours: max_retention_hours__.unwrap_or_default(),
+                    background_quota: background_quota__,
+                    max_session_duration_hours: max_session_duration_hours__.unwrap_or_default(),
+                    max_concurrent_sessions: max_concurrent_sessions__.unwrap_or_default(),
                 })
             }
         }

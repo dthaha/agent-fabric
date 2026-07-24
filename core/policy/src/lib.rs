@@ -4,6 +4,8 @@
 
 pub mod eval;
 pub mod merge;
+pub mod store;
 
 pub use eval::{Decision, DlpOutcome, EvalError, ModelLocus, PolicyGate};
 pub use merge::merge;
+pub use store::PolicyStore;

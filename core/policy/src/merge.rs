@@ -24,6 +24,9 @@ pub fn merge(endpoint: &EndpointPolicy, hosted: &HostedPolicy) -> EffectivePolic
         inference_rules: hosted.inference_rules.clone(),
         kill_switch: endpoint.kill_switch,
         max_retention_hours: endpoint.max_retention_hours,
+        background_quota: hosted.background_quota,
+        max_session_duration_hours: hosted.max_session_duration_hours,
+        max_concurrent_sessions: hosted.max_concurrent_sessions,
     }
 }
 
