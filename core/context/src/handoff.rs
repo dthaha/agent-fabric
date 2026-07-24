@@ -10,10 +10,12 @@ use crate::db::{ContextStore, Result, StoreError};
 use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionState};
 use fabric_types::lease::{HandoffAck, HandoffRequest, Lease, LocusKind};
 
-/// Safety-net lease TTL handed to a new holder: 30 seconds. Leases are
-/// turn-scoped (acquired at turn start, released at turn end); the TTL only
-/// fires when a holder crashes without releasing.
-pub const DEFAULT_LEASE_TTL_MS: i64 = 30 * 1000;
+/// Safety net for crashed holders. Primary release is explicit via
+/// `release_lease` / `release_with_rollback`. The harness calls release at
+/// end of every agent turn. Agent turns with tool calls routinely run
+/// 2-5+ minutes, so the TTL is deliberately generous: it only fires when a
+/// holder crashes without releasing.
+pub const DEFAULT_LEASE_TTL_MS: i64 = 3_600_000;
 
 /// Execute a handoff from the current lease holder to a new holder.
 ///
