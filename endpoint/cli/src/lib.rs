@@ -4,6 +4,7 @@
 //! Talks to the daemon's localhost health/status HTTP server.
 
 use anyhow::{Context, Result};
+use fabric_classifier::{ClassifyInput, LocusDecision};
 use serde::Deserialize;
 
 /// Default port for the daemon's localhost HTTP server.
@@ -101,6 +102,21 @@ impl DaemonClient {
     pub async fn policy(&self) -> Result<PolicyInfo> {
         self.get("/policy").await
     }
+
+    /// Ask the daemon to classify a turn's locus.
+    pub async fn classify(&self, input: &ClassifyInput) -> Result<LocusDecision> {
+        self.http
+            .post(format!("{}/classify", self.base))
+            .json(input)
+            .send()
+            .await
+            .with_context(|| format!("connecting to daemon at {}", self.base))?
+            .error_for_status()
+            .context("daemon returned an error for /classify")?
+            .json()
+            .await
+            .context("decoding daemon response for /classify")
+    }
 }
 
 pub fn print_status(s: &Status) {
@@ -149,6 +165,18 @@ pub fn print_policy(p: &PolicyInfo) {
     println!("tool rules:       {}", p.tool_rule_count);
     println!("kill switch:      {}", on_off(p.kill_switch));
     println!("cua enabled:      {}", on_off(p.cua_enabled));
+}
+
+pub fn print_decision(d: &LocusDecision) {
+    println!("locus:      {}", d.locus.as_str_name());
+    println!("reason:     {}", d.reason);
+    println!("confidence: {:.2}", d.confidence);
+    println!(
+        "fallback:   {}",
+        d.fallback
+            .map(|l| l.as_str_name().to_string())
+            .unwrap_or_else(|| "(none)".into())
+    );
 }
 
 fn none_if_empty(s: &str) -> &str {

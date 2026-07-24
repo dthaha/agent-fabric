@@ -8,8 +8,11 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use fabric_classifier::{
+    ClassifyInput, LocusClassifier, LocusDecision, PolicyAwareClassifier, RulesClassifier,
+};
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -24,6 +27,7 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/status", get(status))
         .route("/sessions", get(sessions))
         .route("/policy", get(policy))
+        .route("/classify", post(classify))
         .with_state(state)
 }
 
@@ -141,6 +145,18 @@ async fn policy(State(state): State<Arc<DaemonState>>) -> Json<Value> {
         "kill_switch": effective.kill_switch,
         "cua_enabled": effective.cua.as_ref().is_some_and(|c| c.enabled),
     }))
+}
+
+/// Classify a turn's locus. Runs the rules engine wrapped in the policy
+/// gate built from the current merged policy, so the answer already
+/// reflects deny-wins downgrades.
+async fn classify(
+    State(state): State<Arc<DaemonState>>,
+    Json(input): Json<ClassifyInput>,
+) -> Json<LocusDecision> {
+    let gate = state.policy.read().expect("policy lock poisoned").gate();
+    let classifier = PolicyAwareClassifier::new(RulesClassifier::new(), gate);
+    Json(classifier.classify(&input))
 }
 
 #[cfg(test)]
@@ -272,6 +288,42 @@ mod tests {
         assert_eq!(body["tool_rule_count"], 2);
         assert_eq!(body["kill_switch"], true);
         assert_eq!(body["cua_enabled"], true);
+    }
+
+    #[tokio::test]
+    async fn classify_runs_rules_through_policy_gate() {
+        let state = test_state();
+        let app = router(state);
+
+        // Rules say hosted (explicit preference, network up) but no policy is
+        // loaded, so the gate has no inference rules and the wrapper
+        // downgrades to endpoint.
+        let body = json!({
+            "intent_text": "summarize my emails",
+            "required_tools": ["email.read"],
+            "estimated_complexity": "low",
+            "estimated_horizon": "single_turn",
+            "data_classes": ["public"],
+            "network_available": true,
+            "local_model_available": true,
+            "user_preference": "prefer_hosted",
+        });
+        let res = app
+            .oneshot(
+                Request::post("/classify")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let decision: fabric_classifier::LocusDecision = serde_json::from_slice(&body).unwrap();
+        assert_eq!(decision.locus, fabric_types::context::Locus::Endpoint);
+        assert!(decision.reason.contains("downgraded to endpoint"));
     }
 
     #[tokio::test]

@@ -10,6 +10,7 @@ name = "fabric-endpoint"
 path = "src/main.rs"
 
 [dependencies]
+fabric-classifier = { path = "../../core/classifier" }
 fabric-context = { path = "../../core/context" }
 fabric-policy = { path = "../../core/policy" }
 fabric-types = { path = "../../core/types" }
