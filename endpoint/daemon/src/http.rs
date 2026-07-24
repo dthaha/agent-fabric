@@ -149,7 +149,9 @@ async fn policy(State(state): State<Arc<DaemonState>>) -> Json<Value> {
 
 /// Classify a turn's locus. Runs the rules engine wrapped in the policy
 /// gate built from the current merged policy, so the answer already
-/// reflects deny-wins downgrades.
+/// reflects deny-wins downgrades. Callers may include a `model_advisory`
+/// in the body; Phase 5 will populate it from the seeded on-device
+/// classifier model.
 async fn classify(
     State(state): State<Arc<DaemonState>>,
     Json(input): Json<ClassifyInput>,

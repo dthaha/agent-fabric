@@ -66,6 +66,7 @@ fn hosted_input() -> ClassifyInput {
         network_available: true,
         local_model_available: true,
         user_preference: UserLocusPref::PreferHosted,
+        model_advisory: None,
     }
 }
 

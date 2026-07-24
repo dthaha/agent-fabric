@@ -91,6 +91,7 @@ async fn main() -> Result<()> {
                 network_available: !offline,
                 local_model_available: !no_local_model,
                 user_preference: parse_preference(&prefer)?,
+                model_advisory: None,
             };
             print_decision(&client.classify(&input).await?);
         }

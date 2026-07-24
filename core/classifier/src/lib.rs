@@ -1,6 +1,19 @@
 //! Offline locus classifier. Decides where each turn thinks (endpoint,
-//! hosted, split) using on-device rules plus an optional tiny model — it
-//! never calls home to decide where to think.
+//! hosted, split) entirely on-device — it never calls home to decide where
+//! to think.
+//!
+//! The architecture is three layers:
+//!
+//! 1. **Model** (Phase 5): a small on-device model produces a
+//!    [`ModelAdvisory`] — a semantic estimate of complexity, horizon, and
+//!    suggested locus. The model informs; it never decides.
+//! 2. **Rules** ([`RulesClassifier`]): the decision layer. Hard constraints
+//!    (kill switch, user prefs, network, restricted data, endpoint-only
+//!    tools) always win. When an advisory is present its suggestion is used
+//!    as the semantic estimate; otherwise deterministic heuristics fill in.
+//! 3. **Policy** ([`PolicyAwareClassifier`]): the final veto. Every
+//!    off-device decision is re-checked against the effective policy and
+//!    downgraded to the endpoint when the gate would refuse it.
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +62,26 @@ pub enum UserLocusPref {
     NoPreference,
 }
 
+/// Advisory output from a small on-device classifier model. When present,
+/// the rules engine uses this as the semantic estimate instead of its own
+/// heuristic fallbacks. The model suggests; the rules decide.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelAdvisory {
+    /// The model's suggested locus for this turn.
+    pub suggested_locus: Locus,
+    /// Semantic complexity estimate from the model.
+    pub complexity: Complexity,
+    /// Semantic horizon estimate from the model.
+    pub horizon: Horizon,
+    /// Data classes the model detected in the intent (e.g. PII, financial).
+    /// These are ADDITIVE — they merge with any data_classes already on the
+    /// input. The model can flag data the caller missed, but cannot remove
+    /// flags the caller set.
+    pub detected_data_classes: Vec<String>,
+    /// Model confidence in its suggestion (0.0-1.0).
+    pub confidence: f32,
+}
+
 /// Everything the classifier knows about a turn when deciding its locus.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -63,6 +96,11 @@ pub struct ClassifyInput {
     pub network_available: bool,
     pub local_model_available: bool,
     pub user_preference: UserLocusPref,
+    /// Advisory from the on-device classifier model. When None, the rules
+    /// engine falls back to its own heuristic rules (long horizon → Split,
+    /// high complexity → Hosted, etc.). When Some, the model's suggestion
+    /// is used as the semantic estimate, subject to constraint validation.
+    pub model_advisory: Option<ModelAdvisory>,
 }
 
 /// Where the turn will run, why, and where to fall back to if the chosen

@@ -1,7 +1,12 @@
-//! Policy-aware wrapper. A rules engine can optimistically pick hosted or
-//! split, but policy is deny-wins: this wrapper re-checks every off-device
-//! decision against the effective policy and downgrades to the endpoint
-//! when the gate would refuse it.
+//! Policy-aware wrapper — the final safety net. The pipeline is:
+//!
+//! 1. Model (Phase 5) produces a ModelAdvisory (semantic estimate)
+//! 2. RulesClassifier validates against hard constraints, uses the
+//!    advisory if present, falls back to heuristics if not
+//! 3. PolicyAwareClassifier re-checks the result against the effective
+//!    policy and downgrades hosted/split → endpoint when policy forbids it
+//!
+//! The model informs, the rules decide, the policy vetoes.
 
 use fabric_policy::{Decision, PolicyGate};
 use fabric_types::context::Locus;

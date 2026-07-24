@@ -1,7 +1,16 @@
-//! Deterministic rules engine. The decision matrix is evaluated in order and
-//! the first matching rule wins, so the most forced outcomes (kill switch,
-//! no network, restricted data) always beat the softer heuristics
-//! (complexity, horizon, local model availability).
+//! Deterministic rules engine — the decision layer. Classification runs in
+//! three phases:
+//!
+//! 1. **Hard constraints** (kill switch, user prefs, no network,
+//!    endpoint-only tools, restricted data) always fire first. No model
+//!    advisory can override them.
+//! 2. **Model advisory**: when a [`ModelAdvisory`](crate::ModelAdvisory) is
+//!    present, its suggested locus is used as the semantic estimate. The
+//!    model's detected data classes are merged into the input beforehand —
+//!    additive only, never subtractive.
+//! 3. **Heuristic fallbacks** (long horizon → split, no local model →
+//!    hosted, high complexity → hosted): less accurate than a model, kept
+//!    for cold start (no model seeded yet) and as a safety net.
 
 use fabric_types::context::Locus;
 
@@ -68,6 +77,31 @@ impl RulesClassifier {
 
 impl LocusClassifier for RulesClassifier {
     fn classify(&self, input: &ClassifyInput) -> LocusDecision {
+        // Pre-processing: merge model-detected data classes into the input.
+        // The model is a sensor — it can flag data the caller missed.
+        // Deny wins: model flags are additive, never subtractive.
+        let effective_input = if let Some(advisory) = &input.model_advisory {
+            if advisory.detected_data_classes.is_empty() {
+                std::borrow::Cow::Borrowed(input)
+            } else {
+                let mut merged = input.clone();
+                for class in &advisory.detected_data_classes {
+                    if !merged.data_classes.contains(class) {
+                        merged.data_classes.push(class.clone());
+                    }
+                }
+                std::borrow::Cow::Owned(merged)
+            }
+        } else {
+            std::borrow::Cow::Borrowed(input)
+        };
+        let input = effective_input.as_ref();
+
+        // ═══ PHASE 1: HARD CONSTRAINTS ═══
+        // These always fire. No model advisory can override them.
+        // Rules: kill switch, user prefs (background/hosted/local),
+        // no network, endpoint-only tools, restricted data.
+
         // 1. Kill switch: the gate denies everything anyway; stay local.
         if self.policy_killed {
             return decision(Locus::Endpoint, "kill switch — local only", 1.0, None);
@@ -116,7 +150,39 @@ impl LocusClassifier for RulesClassifier {
                 None,
             );
         }
-        // 8. Long-horizon work: hosted brain, endpoint hands via the bridge.
+
+        // ═══ PHASE 2: SEMANTIC ESTIMATE ═══
+        // If a model advisory is present, use its suggested locus.
+        // The model's detected_data_classes are merged into the input's
+        // data_classes BEFORE this point (done in a pre-processing step).
+        // The suggestion is advisory — it was already validated against
+        // hard constraints above.
+        if let Some(advisory) = &input.model_advisory {
+            let reason = format!(
+                "model advisory: {} (confidence {:.0}%)",
+                locus_name(advisory.suggested_locus),
+                advisory.confidence * 100.0
+            );
+            let fallback = if advisory.suggested_locus != Locus::Endpoint {
+                Some(Locus::Endpoint)
+            } else {
+                None
+            };
+            return decision(
+                advisory.suggested_locus,
+                reason,
+                advisory.confidence,
+                fallback,
+            );
+        }
+
+        // ═══ PHASE 3: HEURISTIC FALLBACKS ═══
+        // No model advisory available. Fall back to deterministic heuristics.
+        // These are LESS ACCURATE than a model — they exist for the cold-start
+        // case (no model seeded yet) and as a safety net if the model fails.
+
+        // 8. Heuristic fallback: long-horizon work favours a hosted brain
+        //    with endpoint hands via the bridge.
         if input.estimated_horizon == Horizon::LongHorizon && input.network_available {
             return decision(
                 Locus::Split,
@@ -125,7 +191,7 @@ impl LocusClassifier for RulesClassifier {
                 Some(Locus::Endpoint),
             );
         }
-        // 9. Nothing to think with locally.
+        // 9. Heuristic fallback: nothing to think with locally.
         if !input.local_model_available && input.network_available {
             return decision(
                 Locus::Hosted,
@@ -134,7 +200,7 @@ impl LocusClassifier for RulesClassifier {
                 Some(Locus::Endpoint),
             );
         }
-        // 10. Heavy reasoning favours hosted inference.
+        // 10. Heuristic fallback: heavy reasoning favours hosted inference.
         if input.estimated_complexity == Complexity::High && input.network_available {
             return decision(
                 Locus::Hosted,
@@ -143,8 +209,19 @@ impl LocusClassifier for RulesClassifier {
                 Some(Locus::Endpoint),
             );
         }
-        // 11. Default: think where the tools live.
+
+        // ═══ DEFAULT ═══
+        // Think where the tools live.
         decision(Locus::Endpoint, "default to endpoint", 0.6, None)
+    }
+}
+
+fn locus_name(l: Locus) -> &'static str {
+    match l {
+        Locus::Endpoint => "endpoint",
+        Locus::Hosted => "hosted",
+        Locus::Split => "split",
+        _ => "unspecified",
     }
 }
 
@@ -176,6 +253,7 @@ mod tests {
             network_available: true,
             local_model_available: true,
             user_preference: UserLocusPref::NoPreference,
+            model_advisory: None,
         }
     }
 
@@ -354,5 +432,132 @@ mod tests {
 
         // Endpoint decisions never need a fallback.
         assert_eq!(c.classify(&input()).fallback, None);
+    }
+
+    fn advisory(locus: Locus, confidence: f32) -> Option<crate::ModelAdvisory> {
+        Some(crate::ModelAdvisory {
+            suggested_locus: locus,
+            complexity: Complexity::Medium,
+            horizon: Horizon::MultiTurn,
+            detected_data_classes: vec![],
+            confidence,
+        })
+    }
+
+    #[test]
+    fn model_advisory_hosted_with_network() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.model_advisory = advisory(Locus::Hosted, 0.9);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Hosted);
+        assert!(d.reason.contains("model advisory: hosted"));
+        assert_eq!(d.fallback, Some(Locus::Endpoint));
+    }
+
+    #[test]
+    fn model_advisory_split_with_network() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.model_advisory = advisory(Locus::Split, 0.8);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Split);
+        assert!(d.reason.contains("model advisory: split"));
+        assert_eq!(d.fallback, Some(Locus::Endpoint));
+    }
+
+    #[test]
+    fn model_advisory_endpoint() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.model_advisory = advisory(Locus::Endpoint, 0.7);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.fallback, None);
+    }
+
+    #[test]
+    fn model_advisory_overridden_by_kill_switch() {
+        let c = RulesClassifier::with_config(true, vec![], vec![]);
+        let mut i = input();
+        i.model_advisory = advisory(Locus::Hosted, 0.99);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 1.0);
+    }
+
+    #[test]
+    fn model_advisory_overridden_by_no_network() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.network_available = false;
+        i.model_advisory = advisory(Locus::Hosted, 0.99);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 1.0);
+    }
+
+    #[test]
+    fn model_advisory_overridden_by_restricted_data() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.data_classes = vec!["secret".into()];
+        i.model_advisory = advisory(Locus::Hosted, 0.99);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert!(d.reason.contains("secret"));
+    }
+
+    #[test]
+    fn model_advisory_overridden_by_user_pref_local() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.user_preference = UserLocusPref::PreferLocal;
+        i.model_advisory = advisory(Locus::Hosted, 0.99);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert_eq!(d.confidence, 0.95);
+    }
+
+    #[test]
+    fn model_detected_data_classes_merged() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        let mut adv = advisory(Locus::Hosted, 0.9).unwrap();
+        adv.detected_data_classes = vec!["pii".into()];
+        i.model_advisory = Some(adv);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert!(d.reason.contains("pii"));
+    }
+
+    #[test]
+    fn model_detected_data_classes_additive_not_subtractive() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.data_classes = vec!["secret".into()];
+        i.model_advisory = advisory(Locus::Hosted, 0.9);
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert!(d.reason.contains("secret"));
+    }
+
+    #[test]
+    fn heuristic_fallback_when_no_advisory() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.estimated_complexity = Complexity::High;
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.confidence, 0.7);
+    }
+
+    #[test]
+    fn advisory_confidence_propagated() {
+        let c = RulesClassifier::new();
+        let mut i = input();
+        i.model_advisory = advisory(Locus::Hosted, 0.85);
+        let d = c.classify(&i);
+        assert_eq!(d.confidence, 0.85);
     }
 }
