@@ -120,6 +120,39 @@ impl PolicyGate {
         Decision::Allow
     }
 
+    /// Gate a request to run the loop in the background (hosted) against the
+    /// hosted background quota. No quota configured means no restriction.
+    pub fn check_background_quota(
+        &self,
+        active_background: u32,
+        daily_turns_used: u32,
+        user_consented: bool,
+    ) -> Decision {
+        if self.is_killed() {
+            return Decision::Deny("kill switch engaged".into());
+        }
+        let Some(quota) = &self.effective.background_quota else {
+            return Decision::Allow;
+        };
+        if quota.max_concurrent_background > 0 && active_background >= quota.max_concurrent_background
+        {
+            return Decision::Deny(format!(
+                "background concurrency limit {} reached",
+                quota.max_concurrent_background
+            ));
+        }
+        if quota.max_daily_hosted_turns > 0 && daily_turns_used >= quota.max_daily_hosted_turns {
+            return Decision::Deny(format!(
+                "daily hosted turn budget {} exhausted",
+                quota.max_daily_hosted_turns
+            ));
+        }
+        if quota.require_user_consent && !user_consented {
+            return Decision::Deny("background execution requires user consent".into());
+        }
+        Decision::Allow
+    }
+
     /// The context-token cap for a model, if a rule matches.
     pub fn max_context_tokens(&self, model_id: &str) -> Option<u32> {
         self.effective
@@ -525,6 +558,43 @@ mod tests {
 
         let out = g.scan_dlp("nothing sensitive").unwrap();
         assert_eq!(out.action, None);
+    }
+
+    #[test]
+    fn background_quota_enforced() {
+        use fabric_types::policy::BackgroundQuota;
+
+        let mut eff = gate(vec![]).effective().clone();
+        eff.background_quota = Some(BackgroundQuota {
+            max_concurrent_background: 2,
+            max_daily_hosted_turns: 100,
+            require_user_consent: true,
+        });
+        let g = PolicyGate::new(eff);
+
+        // Over concurrent limit.
+        assert!(matches!(
+            g.check_background_quota(2, 0, true),
+            Decision::Deny(_)
+        ));
+        // Over daily turns.
+        assert!(matches!(
+            g.check_background_quota(0, 100, true),
+            Decision::Deny(_)
+        ));
+        // Consent required but not given.
+        assert!(matches!(
+            g.check_background_quota(0, 0, false),
+            Decision::Deny(_)
+        ));
+        // Within limits with consent.
+        assert!(g.check_background_quota(1, 99, true).is_allowed());
+    }
+
+    #[test]
+    fn no_background_quota_allows() {
+        let g = gate(vec![]);
+        assert!(g.check_background_quota(1000, 1000, false).is_allowed());
     }
 
     #[test]
