@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use fabric_types::context::Locus;
 
+pub mod rules;
+
+pub use rules::RulesClassifier;
+
 /// Decides where a single agent turn executes. Implementations must run
 /// entirely on-device and never perform network I/O.
 pub trait LocusClassifier: Send + Sync {
