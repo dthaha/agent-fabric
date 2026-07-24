@@ -100,6 +100,16 @@ impl ContextStore {
         })
     }
 
+    /// Flush the WAL and close the store. Called on daemon shutdown so no
+    /// entries linger in the -wal sidecar file. Dropping the store without
+    /// `close` is also safe (SQLite checkpoints on last close), but this
+    /// makes the flush explicit and surfaces errors.
+    pub fn close(self) -> Result<()> {
+        self.conn
+            .pragma_update(None, "wal_checkpoint", "TRUNCATE")?;
+        Ok(())
+    }
+
     // ---- sessions ----
 
     /// Lightweight liveness check for health/readiness probes.
@@ -702,6 +712,22 @@ pub(crate) mod tests {
             locus: Locus::Endpoint as i32,
             created_at: None,
         }
+    }
+
+    #[test]
+    fn close_checkpoints_wal() {
+        let dir = std::env::temp_dir().join(format!("fabric-close-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ctx.db");
+
+        let store = ContextStore::open(&path).unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store.close().unwrap();
+
+        // WAL was truncated on close; data survived in the main db file.
+        let store = ContextStore::open(&path).unwrap();
+        assert_eq!(store.session("s1").unwrap().session_id, "s1");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

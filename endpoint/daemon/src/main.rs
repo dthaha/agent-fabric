@@ -11,6 +11,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -50,23 +51,60 @@ async fn main() -> Result<()> {
 
     // Health/status server on localhost, with graceful shutdown: it stops
     // accepting connections and drains in-flight requests when signaled.
+    // The cancellation token is shared with every long-running service
+    // (classifier, tool bridge, CUA, seeding) as they attach in later
+    // phases.
+    let token = CancellationToken::new();
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, cfg.health_port));
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(http::serve(Arc::clone(&state), addr, async move {
-        shutdown_rx.await.ok();
+    let server = tokio::spawn(http::serve(Arc::clone(&state), addr, {
+        let token = token.clone();
+        async move { token.cancelled().await }
     }));
 
-    // The daemon's long-running services (classifier, tool bridge, CUA,
-    // seeding) attach here in later phases.
-    tokio::signal::ctrl_c().await?;
-    info!("shutdown signal received");
-    let _ = shutdown_tx.send(());
+    wait_for_shutdown_signal().await;
+    info!("shutdown signal received, draining");
+    token.cancel();
+
     server
         .await
         .context("health server task panicked")?
         .context("health server error")?;
+
+    // Close the context store, flushing the WAL. The server task has
+    // finished by now, so main is the only remaining state holder.
+    match Arc::try_unwrap(state) {
+        Ok(state) => {
+            let store = state.store.into_inner().expect("store lock poisoned");
+            store.close().context("closing context store")?;
+            info!("context store closed (WAL checkpointed)");
+        }
+        Err(_) => warn!("state still referenced at shutdown; skipping explicit store close"),
+    }
     info!("shutdown complete");
     Ok(())
+}
+
+/// Block until SIGINT (ctrl-c) or SIGTERM arrives.
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigterm = signal(SignalKind::terminate()).expect("installing SIGTERM handler");
+    tokio::select! {
+        res = tokio::signal::ctrl_c() => {
+            res.expect("installing SIGINT handler");
+            info!("received SIGINT");
+        }
+        _ = sigterm.recv() => info!("received SIGTERM"),
+    }
+}
+
+/// Block until ctrl-c arrives (non-unix fallback).
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("installing ctrl-c handler");
+    info!("received ctrl-c");
 }
 
 /// Load the endpoint policy from disk at startup. A missing file is not
