@@ -2,10 +2,32 @@
 //! hosted policies, re-merges them on every load, and hands out fresh gates
 //! reflecting the latest merged state — no restart required.
 
+use std::path::Path;
+
 use fabric_types::policy::{EffectivePolicy, EndpointPolicy, HostedPolicy};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::eval::PolicyGate;
 use crate::merge::merge;
+
+#[derive(Debug, Error)]
+pub enum StoreError {
+    #[error("policy store I/O at {path}: {source}")]
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
+    #[error("policy store serialization: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+/// On-disk form of the store: both policy documents, versioned.
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedPolicies {
+    endpoint: Option<EndpointPolicy>,
+    hosted: Option<HostedPolicy>,
+}
 
 /// Holds the latest endpoint + hosted policies and their merged product.
 /// Loading a new policy version re-merges immediately; the next [`Self::gate`]
@@ -64,6 +86,37 @@ impl PolicyStore {
         let endpoint = self.endpoint.clone().unwrap_or_default();
         let hosted = self.hosted.clone().unwrap_or_default();
         self.effective = merge(&endpoint, &hosted);
+    }
+
+    /// Persist both policy documents to `path` as JSON.
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), StoreError> {
+        let path = path.as_ref();
+        let persisted = PersistedPolicies {
+            endpoint: self.endpoint.clone(),
+            hosted: self.hosted.clone(),
+        };
+        let json = serde_json::to_vec_pretty(&persisted)?;
+        std::fs::write(path, json).map_err(|source| StoreError::Io {
+            path: path.display().to_string(),
+            source,
+        })
+    }
+
+    /// Load both policy documents from `path`, re-merging automatically.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, StoreError> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path).map_err(|source| StoreError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+        let persisted: PersistedPolicies = serde_json::from_slice(&bytes)?;
+        let mut store = Self {
+            endpoint: persisted.endpoint,
+            hosted: persisted.hosted,
+            effective: EffectivePolicy::default(),
+        };
+        store.remerge();
+        Ok(store)
     }
 }
 
@@ -158,8 +211,49 @@ mod tests {
     }
 
     #[test]
-    fn gate_reflects_endpoint_dlp_patterns() {
+    fn save_load_round_trip() {
         let mut store = PolicyStore::new();
+        let mut ep = endpoint("v9", vec![allow("shell.*")]);
+        ep.dlp_patterns = vec![fabric_types::policy::DlpPattern {
+            name: "ssn".into(),
+            regex: r"\b\d{3}-\d{2}-\d{4}\b".into(),
+            action: fabric_types::policy::DlpAction::Redact as i32,
+        }];
+        store.load_endpoint(ep);
+        let mut hp = hosted("v4");
+        hp.tool_restrictions = vec![ToolRule {
+            tool_pattern: "shell.exec".into(),
+            action: ToolAction::Deny as i32,
+            condition: String::new(),
+        }];
+        hp.max_concurrent_sessions = 7;
+        store.load_hosted(hp);
+
+        let path = std::env::temp_dir().join(format!("fabric-policy-store-{}.json", std::process::id()));
+        store.save(&path).unwrap();
+        let loaded = PolicyStore::load(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(loaded.endpoint_version(), Some("v9"));
+        assert_eq!(loaded.hosted_version(), Some("v4"));
+        assert_eq!(loaded.effective(), store.effective());
+
+        let gate = loaded.gate();
+        assert!(matches!(gate.check_tool("shell.exec"), Decision::Deny(_)));
+        assert!(gate.check_tool("shell.list").is_allowed());
+        assert!(matches!(gate.check_session_limits(0.0, 7), Decision::Deny(_)));
+        let out = gate.scan_dlp("ssn 123-45-6789").unwrap();
+        assert!(out.redacted_content.contains("[REDACTED:ssn]"));
+    }
+
+    #[test]
+    fn load_missing_file_errors() {
+        let res = PolicyStore::load("/nonexistent/fabric-policy.json");
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn gate_reflects_endpoint_dlp_patterns() {        let mut store = PolicyStore::new();
         let mut ep = endpoint("v1", vec![]);
         ep.dlp_patterns = vec![fabric_types::policy::DlpPattern {
             name: "ssn".into(),
