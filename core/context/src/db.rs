@@ -9,6 +9,9 @@ use tracing::instrument;
 use fabric_types::context::{ContextEntry, SessionMeta, SessionState};
 use fabric_types::lease::{Lease, LeaseState, LocusKind};
 
+pub use crate::clock::now_ms;
+use crate::clock::MonotonicClock;
+
 const SCHEMA: &str = include_str!("schema.sql");
 
 #[derive(Debug, Error)]
@@ -45,13 +48,6 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-pub fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 pub(crate) fn ms_to_timestamp(ms: i64) -> pbjson_types::Timestamp {
     pbjson_types::Timestamp {
         seconds: ms.div_euclid(1000),
@@ -68,6 +64,7 @@ pub(crate) fn timestamp_to_ms(ts: Option<&pbjson_types::Timestamp>) -> i64 {
 /// that must be atomic take `&mut self` and run inside a transaction.
 pub struct ContextStore {
     conn: Connection,
+    clock: MonotonicClock,
 }
 
 impl ContextStore {
@@ -85,7 +82,10 @@ impl ContextStore {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            clock: MonotonicClock::new(),
+        })
     }
 
     // ---- sessions ----
@@ -350,7 +350,7 @@ impl ContextStore {
         let seq = self.head_seq(&entry.session_id)? + 1;
         entry.seq = seq;
         if entry.created_at.is_none() {
-            entry.created_at = Some(ms_to_timestamp(now_ms()));
+            entry.created_at = Some(ms_to_timestamp(self.clock.tick()));
         }
         self.insert_entry_raw(entry)?;
         self.conn.execute(
