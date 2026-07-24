@@ -359,6 +359,7 @@ dependencies = [
  "anyhow",
  "axum",
  "fabric-context",
+ "fabric-endpoint-mdm",
  "fabric-policy",
  "fabric-types",
  "serde",
@@ -389,7 +390,9 @@ dependencies = [
 name = "fabric-endpoint-mdm"
 version = "0.1.0"
 dependencies = [
+ "fabric-types",
  "serde",
+ "serde_json",
  "thiserror",
  "tracing",
 ]

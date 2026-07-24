@@ -119,17 +119,36 @@ fn load_policy(state: &DaemonState) {
         );
         return;
     }
-    let mut policy = state.policy.write().expect("policy lock poisoned");
-    match policy.load_endpoint_from_file(path) {
-        Ok(()) => info!(
-            path = %path.display(),
-            version = policy.endpoint_version().unwrap_or(""),
-            "endpoint policy loaded"
-        ),
+    match read_endpoint_policy(path) {
+        Ok(policy) => {
+            let version = policy.version.clone();
+            state
+                .policy
+                .write()
+                .expect("policy lock poisoned")
+                .load_endpoint(policy);
+            info!(path = %path.display(), version, "endpoint policy loaded");
+        }
         Err(e) => warn!(
             path = %path.display(),
             error = %e,
             "failed to load endpoint policy — starting fail-closed"
         ),
     }
+}
+
+/// Read the endpoint policy document: MDM wrapper packs (detected by the
+/// `fabric-mdm/` format marker) go through the MDM ingest layer, everything
+/// else is treated as a bare `EndpointPolicy` JSON document.
+fn read_endpoint_policy(path: &std::path::Path) -> Result<fabric_types::policy::EndpointPolicy> {
+    let bytes =
+        std::fs::read(path).with_context(|| format!("reading policy {}", path.display()))?;
+    let policy = if fabric_endpoint_mdm::is_policy_pack(&bytes) {
+        fabric_endpoint_mdm::parse_policy_pack(&bytes)
+            .with_context(|| format!("parsing MDM policy pack {}", path.display()))?
+    } else {
+        serde_json::from_slice(&bytes)
+            .with_context(|| format!("parsing endpoint policy {}", path.display()))?
+    };
+    Ok(policy)
 }

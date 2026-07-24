@@ -13,6 +13,7 @@ path = "src/main.rs"
 fabric-context = { path = "../../core/context" }
 fabric-policy = { path = "../../core/policy" }
 fabric-types = { path = "../../core/types" }
+fabric-endpoint-mdm = { path = "../mdm" }
 anyhow.workspace = true
 axum.workspace = true
 serde.workspace = true
