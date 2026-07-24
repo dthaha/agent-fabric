@@ -2,6 +2,10 @@
 
 proto:
 	buf generate
+	# prost-serde emits serde impls for google.protobuf WKT even though
+	# extern_path maps them to pbjson-types (which already implements serde).
+	# The output would violate the orphan rule if included; drop it.
+	rm -rf core/types/src/gen/google
 
 endpoint:
 	cargo build --release -p fabric-endpoint

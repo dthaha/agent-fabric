@@ -5,6 +5,11 @@ lint:
   use:
     - STANDARD
   except:
+    # Flat layout by design: proto/<plane>.proto with unversioned
+    # fabric.<plane> packages. Versioning the packages (fabric.context.v1)
+    # would churn every Rust module path (fabric_types::context::v1::...)
+    # for no wire-format benefit; schema evolution is handled by FIELD
+    # breaking-change detection below and reserved tags, not package bumps.
     - PACKAGE_VERSION_SUFFIX
     - PACKAGE_DIRECTORY_MATCH
     - DIRECTORY_SAME_PACKAGE

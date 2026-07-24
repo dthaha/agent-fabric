@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package fabric.lease;
 
+import "context.proto";
 import "google/protobuf/timestamp.proto";
 
 // A write lease on a session's context op-log. Exactly one ACTIVE lease per
@@ -10,18 +11,11 @@ message Lease {
   string lease_id = 1;
   string session_id = 2;
   string holder_id = 3;
-  LocusKind locus = 4;
+  fabric.context.Locus locus = 4;
   uint64 granted_seq = 5;
   google.protobuf.Timestamp granted_at = 6;
   google.protobuf.Timestamp expires_at = 7;
   LeaseState state = 8;
-}
-
-enum LocusKind {
-  LOCUS_KIND_UNSPECIFIED = 0;
-  LOCUS_KIND_ENDPOINT = 1;
-  LOCUS_KIND_HOSTED = 2;
-  LOCUS_KIND_SPLIT = 3;
 }
 
 enum LeaseState {

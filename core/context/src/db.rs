@@ -7,7 +7,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionMeta, SessionState};
-use fabric_types::lease::{Lease, LeaseState, LocusKind};
+use fabric_types::lease::{Lease, LeaseState};
 
 pub use crate::clock::now_ms;
 use crate::clock::MonotonicClock;
@@ -224,7 +224,7 @@ impl ContextStore {
         &self,
         session_id: &str,
         holder_id: &str,
-        locus: LocusKind,
+        locus: Locus,
         ttl_ms: i64,
     ) -> Result<Lease> {
         if let Some(existing) = self.active_lease(session_id)? {
@@ -646,7 +646,6 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextEntry> {
 pub(crate) mod tests {
     use super::*;
     use fabric_types::context::{EntryKind, Locus, SessionState};
-    use fabric_types::lease::LocusKind;
 
     pub(crate) fn test_session(session_id: &str) -> SessionMeta {
         SessionMeta {
@@ -667,7 +666,7 @@ pub(crate) mod tests {
             lease_id: lease_id.into(),
             session_id: session_id.into(),
             holder_id: holder.into(),
-            locus: LocusKind::Endpoint as i32,
+            locus: Locus::Endpoint as i32,
             granted_seq: 0,
             granted_at: Some(ms_to_timestamp(now_ms())),
             expires_at: Some(ms_to_timestamp(now_ms() + 60_000)),
@@ -696,7 +695,7 @@ pub(crate) mod tests {
 
         // Turn 1: acquire, append, release.
         let lease = store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         assert_eq!(lease.state, LeaseState::Active as i32);
         let mut e1 = test_entry("e1", "s1", "endpoint-1");
@@ -719,7 +718,7 @@ pub(crate) mod tests {
 
         // Turn 2: a fresh acquire succeeds after release.
         let lease2 = store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         assert_ne!(lease.lease_id, lease2.lease_id);
         assert_eq!(lease2.granted_seq, 1);
@@ -732,10 +731,10 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         let err = store
-            .acquire_lease("s1", "hosted-1", LocusKind::Hosted, 30_000)
+            .acquire_lease("s1", "hosted-1", Locus::Hosted, 30_000)
             .unwrap_err();
         assert!(matches!(err, StoreError::LeaseConflict(_)));
     }
@@ -746,11 +745,11 @@ pub(crate) mod tests {
         store.create_session(&test_session("s1")).unwrap();
         // Holder crashes mid-turn without releasing; TTL is the safety net.
         let crashed = store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 0)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 0)
             .unwrap();
 
         let lease = store
-            .acquire_lease("s1", "hosted-1", LocusKind::Hosted, 30_000)
+            .acquire_lease("s1", "hosted-1", Locus::Hosted, 30_000)
             .unwrap();
         assert_eq!(lease.holder_id, "hosted-1");
         assert_eq!(
@@ -766,7 +765,7 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         let err = store.release_lease("s1", "mallory").unwrap_err();
         assert!(matches!(err, StoreError::NotLeaseHolder { .. }));
@@ -785,7 +784,7 @@ pub(crate) mod tests {
             let store = ContextStore::open_in_memory().unwrap();
             store.create_session(&test_session("s1")).unwrap();
             store
-                .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+                .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
                 .unwrap();
             store.set_session_state("s1", state as i32).unwrap();
 
@@ -804,7 +803,7 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         let mut e1 = test_entry("e1", "s1", "endpoint-1");
         store.append_entry(&mut e1).unwrap();
@@ -821,7 +820,7 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         let lease = store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         let mut e1 = test_entry("e1", "s1", "endpoint-1");
         store.append_entry(&mut e1).unwrap();
@@ -864,7 +863,7 @@ pub(crate) mod tests {
             meta.org_id = org.into();
             store.create_session(&meta).unwrap();
             store
-                .acquire_lease(sid, "endpoint-1", LocusKind::Endpoint, 30_000)
+                .acquire_lease(sid, "endpoint-1", Locus::Endpoint, 30_000)
                 .unwrap();
         }
         // s4 is in org-1 but has no active lease: must be skipped.
@@ -947,7 +946,7 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
 
         let err = store.complete("s1").unwrap_err();
@@ -1045,7 +1044,7 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
 
         // Partial turn: no ASSISTANT_MESSAGE yet.
@@ -1074,7 +1073,7 @@ pub(crate) mod tests {
 
         // The log can be written again from seq 1.
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         let mut e = test_entry("e-retry", "s1", "endpoint-1");
         assert_eq!(store.append_entry(&mut e).unwrap(), 1);
@@ -1085,7 +1084,7 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
 
         // Completed flow (seq 1-4), then a partial turn (seq 5-6).
@@ -1125,7 +1124,7 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         append_kinds(
             &store,
@@ -1145,7 +1144,7 @@ pub(crate) mod tests {
         let store = ContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
-            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         append_kinds(&store, "s1", "endpoint-1", &[EntryKind::UserMessage]);
 

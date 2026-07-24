@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::db::{ContextStore, Result, StoreError};
 use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionState};
-use fabric_types::lease::{HandoffAck, HandoffRequest, Lease, LocusKind};
+use fabric_types::lease::{HandoffAck, HandoffRequest, Lease};
 
 /// Safety net for crashed holders. Primary release is explicit via
 /// `release_lease` / `release_with_rollback`. The harness calls release at
@@ -32,7 +32,7 @@ pub const DEFAULT_LEASE_TTL_MS: i64 = 3_600_000;
 pub fn execute_handoff(
     store: &ContextStore,
     request: &HandoffRequest,
-    to_locus: LocusKind,
+    to_locus: Locus,
     ttl_ms: i64,
 ) -> Result<Lease> {
     let old_lease = store.verify_writer(&request.session_id, &request.from_holder)?;
@@ -59,12 +59,7 @@ pub fn execute_handoff(
         payload: request.reason.clone().into_bytes(),
         lease_holder: request.from_holder.clone(),
         policy_version: String::new(),
-        locus: match LocusKind::try_from(old_lease.locus) {
-            Ok(LocusKind::Endpoint) => Locus::Endpoint as i32,
-            Ok(LocusKind::Hosted) => Locus::Hosted as i32,
-            Ok(LocusKind::Split) => Locus::Split as i32,
-            _ => Locus::Unspecified as i32,
-        },
+        locus: old_lease.locus,
         created_at: None,
     };
     store.append_entry(&mut marker)?;
@@ -150,8 +145,7 @@ mod tests {
             freeze_at_seq: 3,
             reason: "long-horizon task".into(),
         };
-        let new_lease =
-            execute_handoff(&store, &req, LocusKind::Hosted, DEFAULT_LEASE_TTL_MS).unwrap();
+        let new_lease = execute_handoff(&store, &req, Locus::Hosted, DEFAULT_LEASE_TTL_MS).unwrap();
 
         // Old lease released, new lease active from the freeze point.
         assert_eq!(
@@ -204,7 +198,7 @@ mod tests {
             reason: "hostile takeover".into(),
         };
         assert!(matches!(
-            execute_handoff(&store, &req, LocusKind::Hosted, DEFAULT_LEASE_TTL_MS),
+            execute_handoff(&store, &req, Locus::Hosted, DEFAULT_LEASE_TTL_MS),
             Err(StoreError::NotLeaseHolder { .. })
         ));
     }
@@ -222,8 +216,7 @@ mod tests {
             freeze_at_seq: 1,
             reason: String::new(),
         };
-        let new_lease =
-            execute_handoff(&store, &req, LocusKind::Hosted, DEFAULT_LEASE_TTL_MS).unwrap();
+        let new_lease = execute_handoff(&store, &req, Locus::Hosted, DEFAULT_LEASE_TTL_MS).unwrap();
 
         let ack = HandoffAck {
             session_id: "s1".into(),

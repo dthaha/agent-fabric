@@ -375,7 +375,7 @@ impl serde::Serialize for Lease {
             struct_ser.serialize_field("holderId", &self.holder_id)?;
         }
         if self.locus != 0 {
-            let v = LocusKind::try_from(self.locus)
+            let v = super::context::Locus::try_from(self.locus)
                 .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.locus)))?;
             struct_ser.serialize_field("locus", &v)?;
         }
@@ -511,7 +511,7 @@ impl<'de> serde::Deserialize<'de> for Lease {
                             if locus__.is_some() {
                                 return Err(serde::de::Error::duplicate_field("locus"));
                             }
-                            locus__ = Some(map_.next_value::<LocusKind>()? as i32);
+                            locus__ = Some(map_.next_value::<super::context::Locus>()? as i32);
                         }
                         GeneratedField::GrantedSeq => {
                             if granted_seq__.is_some() {
@@ -632,83 +632,6 @@ impl<'de> serde::Deserialize<'de> for LeaseState {
                     "LEASE_STATE_REVOKED" => Ok(LeaseState::Revoked),
                     "LEASE_STATE_TRANSFERRED" => Ok(LeaseState::Transferred),
                     "LEASE_STATE_RELEASED" => Ok(LeaseState::Released),
-                    _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
-                }
-            }
-        }
-        deserializer.deserialize_any(GeneratedVisitor)
-    }
-}
-impl serde::Serialize for LocusKind {
-    #[allow(deprecated)]
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let variant = match self {
-            Self::Unspecified => "LOCUS_KIND_UNSPECIFIED",
-            Self::Endpoint => "LOCUS_KIND_ENDPOINT",
-            Self::Hosted => "LOCUS_KIND_HOSTED",
-            Self::Split => "LOCUS_KIND_SPLIT",
-        };
-        serializer.serialize_str(variant)
-    }
-}
-impl<'de> serde::Deserialize<'de> for LocusKind {
-    #[allow(deprecated)]
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        const FIELDS: &[&str] = &[
-            "LOCUS_KIND_UNSPECIFIED",
-            "LOCUS_KIND_ENDPOINT",
-            "LOCUS_KIND_HOSTED",
-            "LOCUS_KIND_SPLIT",
-        ];
-
-        struct GeneratedVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-            type Value = LocusKind;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(formatter, "expected one of: {:?}", &FIELDS)
-            }
-
-            fn visit_i64<E>(self, v: i64) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                i32::try_from(v)
-                    .ok()
-                    .and_then(|x| x.try_into().ok())
-                    .ok_or_else(|| {
-                        serde::de::Error::invalid_value(serde::de::Unexpected::Signed(v), &self)
-                    })
-            }
-
-            fn visit_u64<E>(self, v: u64) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                i32::try_from(v)
-                    .ok()
-                    .and_then(|x| x.try_into().ok())
-                    .ok_or_else(|| {
-                        serde::de::Error::invalid_value(serde::de::Unexpected::Unsigned(v), &self)
-                    })
-            }
-
-            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match value {
-                    "LOCUS_KIND_UNSPECIFIED" => Ok(LocusKind::Unspecified),
-                    "LOCUS_KIND_ENDPOINT" => Ok(LocusKind::Endpoint),
-                    "LOCUS_KIND_HOSTED" => Ok(LocusKind::Hosted),
-                    "LOCUS_KIND_SPLIT" => Ok(LocusKind::Split),
                     _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
                 }
             }

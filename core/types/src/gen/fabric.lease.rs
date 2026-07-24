@@ -11,7 +11,7 @@ pub struct Lease {
     pub session_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub holder_id: ::prost::alloc::string::String,
-    #[prost(enumeration="LocusKind", tag="4")]
+    #[prost(enumeration="super::context::Locus", tag="4")]
     pub locus: i32,
     #[prost(uint64, tag="5")]
     pub granted_seq: u64,
@@ -56,44 +56,15 @@ pub struct HandoffAck {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
-pub enum LocusKind {
-    Unspecified = 0,
-    Endpoint = 1,
-    Hosted = 2,
-    Split = 3,
-}
-impl LocusKind {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            LocusKind::Unspecified => "LOCUS_KIND_UNSPECIFIED",
-            LocusKind::Endpoint => "LOCUS_KIND_ENDPOINT",
-            LocusKind::Hosted => "LOCUS_KIND_HOSTED",
-            LocusKind::Split => "LOCUS_KIND_SPLIT",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "LOCUS_KIND_UNSPECIFIED" => Some(Self::Unspecified),
-            "LOCUS_KIND_ENDPOINT" => Some(Self::Endpoint),
-            "LOCUS_KIND_HOSTED" => Some(Self::Hosted),
-            "LOCUS_KIND_SPLIT" => Some(Self::Split),
-            _ => None,
-        }
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
 pub enum LeaseState {
     Unspecified = 0,
     Active = 1,
     Expired = 2,
     Revoked = 3,
     Transferred = 4,
+    /// Released by the holder at the end of a turn. Leases are turn-scoped:
+    /// acquired at turn start, released at turn end; the TTL is only a safety
+    /// net for crashed holders.
     Released = 5,
 }
 impl LeaseState {
