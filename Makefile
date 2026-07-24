@@ -1,4 +1,4 @@
-.PHONY: proto endpoint hosted test check
+.PHONY: proto endpoint endpoint-cross hosted test check
 
 proto:
 	buf generate
@@ -9,6 +9,13 @@ proto:
 
 endpoint:
 	cargo build --release -p fabric-endpoint
+
+# Local cross-compile targets; not run in CI.
+endpoint-cross:
+	cargo build --release -p fabric-endpoint --target aarch64-apple-darwin
+	cargo build --release -p fabric-endpoint --target x86_64-apple-darwin
+	cargo build --release -p fabric-endpoint --target x86_64-unknown-linux-gnu
+	cargo build --release -p fabric-endpoint --target aarch64-unknown-linux-gnu
 
 hosted:
 	docker build -f deploy/docker/Dockerfile.hosted -t fabric-hosted .
