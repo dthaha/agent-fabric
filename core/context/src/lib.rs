@@ -9,6 +9,6 @@ pub mod reconcile;
 
 pub use clock::{is_clock_sane, now_ms, MonotonicClock};
 
-pub use db::{ContextStore, StoreError};
+pub use db::{ContextStore, RollbackReport, StoreError};
 pub use handoff::{ack_handoff, catch_up, execute_handoff};
 pub use reconcile::{reconcile, ReconcileReport, SeqConflict};

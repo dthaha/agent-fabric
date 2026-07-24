@@ -48,6 +48,17 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
+/// Outcome of [`ContextStore::release_with_rollback`]: the op-log was
+/// truncated back to the last completed flow boundary.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RollbackReport {
+    /// Seq of the last ASSISTANT_MESSAGE entry (the completed flow
+    /// boundary). 0 if the session had no assistant messages yet.
+    pub rolled_back_to_seq: u64,
+    /// Number of partial-turn entries removed.
+    pub entries_removed: u64,
+}
+
 pub(crate) fn ms_to_timestamp(ms: i64) -> pbjson_types::Timestamp {
     pbjson_types::Timestamp {
         seconds: ms.div_euclid(1000),
@@ -264,6 +275,52 @@ impl ContextStore {
             params![now_ms(), session_id],
         )?;
         Ok(())
+    }
+
+    /// User-initiated release with rollback (e.g. stop/cancel in the
+    /// harness). Discards partial entries from the current incomplete agent
+    /// turn: the op-log is truncated back to the last completed flow
+    /// boundary — the seq of the last ASSISTANT_MESSAGE entry. Everything
+    /// after that boundary is in-progress and is deleted. If the session
+    /// has no assistant messages yet, the boundary is seq 0 and all entries
+    /// are removed.
+    ///
+    /// Requires the caller to hold the active lease. Marks the lease
+    /// RELEASED and clears the session's active lease. For normal turn
+    /// completion (nothing to discard) use [`ContextStore::release_lease`].
+    pub fn release_with_rollback(
+        &self,
+        session_id: &str,
+        holder_id: &str,
+    ) -> Result<RollbackReport> {
+        let lease = self
+            .active_lease(session_id)?
+            .ok_or_else(|| StoreError::NoActiveLease(session_id.to_string()))?;
+        if lease.holder_id != holder_id {
+            return Err(StoreError::NotLeaseHolder {
+                writer: holder_id.to_string(),
+                holder: lease.holder_id,
+            });
+        }
+        let boundary: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(seq), 0) FROM context_entries
+                 WHERE session_id = ?1 AND kind = ?2",
+            params![session_id, EntryKind::AssistantMessage as i32],
+            |row| row.get(0),
+        )?;
+        let removed = self.conn.execute(
+            "DELETE FROM context_entries WHERE session_id = ?1 AND seq > ?2",
+            params![session_id, boundary],
+        )?;
+        self.set_lease_state(&lease.lease_id, LeaseState::Released)?;
+        self.conn.execute(
+            "UPDATE sessions SET active_lease = '', last_activity_ms = ?1 WHERE session_id = ?2",
+            params![now_ms(), session_id],
+        )?;
+        Ok(RollbackReport {
+            rolled_back_to_seq: boundary as u64,
+            entries_removed: removed as u64,
+        })
     }
 
     /// Revoke the session's active lease. This is the admin kill-switch: it
@@ -973,5 +1030,129 @@ pub(crate) mod tests {
         assert_eq!(tail.len(), 2);
         assert_eq!(tail[0].entry_id, "e4");
         assert_eq!(tail[1].entry_id, "e5");
+    }
+
+    fn append_kinds(store: &ContextStore, session_id: &str, holder: &str, kinds: &[EntryKind]) {
+        for (i, kind) in kinds.iter().enumerate() {
+            let mut e = test_entry(&format!("e{i}"), session_id, holder);
+            e.kind = *kind as i32;
+            store.append_entry(&mut e).unwrap();
+        }
+    }
+
+    #[test]
+    fn release_with_rollback_discards_partial_turn() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+
+        // Partial turn: no ASSISTANT_MESSAGE yet.
+        append_kinds(
+            &store,
+            "s1",
+            "endpoint-1",
+            &[
+                EntryKind::UserMessage,
+                EntryKind::ToolCall,
+                EntryKind::ToolResult,
+            ],
+        );
+        assert_eq!(store.head_seq("s1").unwrap(), 3);
+
+        let report = store.release_with_rollback("s1", "endpoint-1").unwrap();
+        assert_eq!(
+            report,
+            RollbackReport {
+                rolled_back_to_seq: 0,
+                entries_removed: 3,
+            }
+        );
+        assert_eq!(store.head_seq("s1").unwrap(), 0);
+        assert!(store.active_lease("s1").unwrap().is_none());
+
+        // The log can be written again from seq 1.
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        let mut e = test_entry("e-retry", "s1", "endpoint-1");
+        assert_eq!(store.append_entry(&mut e).unwrap(), 1);
+    }
+
+    #[test]
+    fn release_with_rollback_preserves_completed_flows() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+
+        // Completed flow (seq 1-4), then a partial turn (seq 5-6).
+        append_kinds(
+            &store,
+            "s1",
+            "endpoint-1",
+            &[
+                EntryKind::UserMessage,
+                EntryKind::ToolCall,
+                EntryKind::ToolResult,
+                EntryKind::AssistantMessage,
+                EntryKind::UserMessage,
+                EntryKind::ToolCall,
+            ],
+        );
+
+        let report = store.release_with_rollback("s1", "endpoint-1").unwrap();
+        assert_eq!(
+            report,
+            RollbackReport {
+                rolled_back_to_seq: 4,
+                entries_removed: 2,
+            }
+        );
+        assert_eq!(store.head_seq("s1").unwrap(), 4);
+        assert_eq!(
+            store.entry_at_seq("s1", 4).unwrap().unwrap().kind,
+            EntryKind::AssistantMessage as i32
+        );
+        assert!(store.entry_at_seq("s1", 5).unwrap().is_none());
+        assert!(store.active_lease("s1").unwrap().is_none());
+    }
+
+    #[test]
+    fn release_lease_keeps_partial_entries() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        append_kinds(
+            &store,
+            "s1",
+            "endpoint-1",
+            &[EntryKind::UserMessage, EntryKind::ToolCall],
+        );
+
+        // Normal release: clean, no rollback.
+        store.release_lease("s1", "endpoint-1").unwrap();
+        assert_eq!(store.head_seq("s1").unwrap(), 2);
+        assert!(store.active_lease("s1").unwrap().is_none());
+    }
+
+    #[test]
+    fn release_with_rollback_rejects_non_holder() {
+        let store = ContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", LocusKind::Endpoint, 30_000)
+            .unwrap();
+        append_kinds(&store, "s1", "endpoint-1", &[EntryKind::UserMessage]);
+
+        let err = store.release_with_rollback("s1", "mallory").unwrap_err();
+        assert!(matches!(err, StoreError::NotLeaseHolder { .. }));
+        // Nothing removed, lease still active.
+        assert_eq!(store.head_seq("s1").unwrap(), 1);
+        assert!(store.active_lease("s1").unwrap().is_some());
     }
 }
