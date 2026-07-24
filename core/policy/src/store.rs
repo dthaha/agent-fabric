@@ -50,6 +50,21 @@ impl PolicyStore {
         self.remerge();
     }
 
+    /// Read an endpoint policy from a JSON file and load it, re-merging
+    /// automatically. The file must be a bare `EndpointPolicy` document
+    /// (pbjson serde); MDM wrapper formats are unwrapped by the MDM ingest
+    /// layer before they reach the store.
+    pub fn load_endpoint_from_file(&mut self, path: impl AsRef<Path>) -> Result<(), StoreError> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path).map_err(|source| StoreError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+        let policy: EndpointPolicy = serde_json::from_slice(&bytes)?;
+        self.load_endpoint(policy);
+        Ok(())
+    }
+
     /// Store a new hosted policy version and re-merge.
     pub fn load_hosted(&mut self, policy: HostedPolicy) {
         self.hosted = Some(policy);
@@ -161,6 +176,59 @@ mod tests {
             action: ToolAction::Allow as i32,
             condition: String::new(),
         }
+    }
+
+    #[test]
+    fn load_endpoint_from_file_round_trip() {
+        let path = std::env::temp_dir().join(format!(
+            "fabric-endpoint-policy-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&endpoint("v5", vec![allow("fs.read")])).unwrap(),
+        )
+        .unwrap();
+
+        let mut store = PolicyStore::new();
+        store.load_endpoint_from_file(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(store.endpoint_version(), Some("v5"));
+        assert!(store.gate().check_tool("fs.read").is_allowed());
+        assert!(matches!(
+            store.gate().check_tool("shell.exec"),
+            Decision::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn load_endpoint_from_file_missing_errors() {
+        let mut store = PolicyStore::new();
+        let res = store.load_endpoint_from_file("/nonexistent/fabric-policy.json");
+        assert!(res.is_err());
+        // Failed load leaves the store empty and fail-closed.
+        assert_eq!(store.endpoint_version(), None);
+        assert!(matches!(
+            store.gate().check_tool("fs.read"),
+            Decision::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn load_endpoint_from_file_rejects_corrupt_json() {
+        let path = std::env::temp_dir().join(format!(
+            "fabric-endpoint-policy-corrupt-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"{not json").unwrap();
+
+        let mut store = PolicyStore::new();
+        let res = store.load_endpoint_from_file(&path);
+        std::fs::remove_file(&path).ok();
+
+        assert!(matches!(res, Err(StoreError::Serde(_))));
+        assert_eq!(store.endpoint_version(), None);
     }
 
     #[test]

@@ -15,6 +15,9 @@ pub struct DaemonConfig {
     pub device_id: String,
     /// Path to the local context store (SQLite, WAL mode).
     pub context_db: PathBuf,
+    /// Path to the endpoint policy document (JSON). Missing file means the
+    /// daemon starts fail-closed with an empty policy store.
+    pub policy_path: PathBuf,
     /// Hosted control-plane base URL. Empty means offline-only.
     pub hosted_url: String,
     /// Port for the localhost health/status HTTP server.
@@ -30,6 +33,7 @@ impl Default for DaemonConfig {
         Self {
             device_id: format!("device-{}", uuid::Uuid::now_v7()),
             context_db: PathBuf::from("fabric-context.db"),
+            policy_path: PathBuf::from("fabric-policy.json"),
             hosted_url: String::new(),
             health_port: 47770,
             tool_bridge_port: 47771,
@@ -76,5 +80,6 @@ mod tests {
         let cfg: DaemonConfig = serde_json::from_str(r#"{"device_id":"dev-1"}"#).unwrap();
         assert_eq!(cfg.device_id, "dev-1");
         assert_eq!(cfg.health_port, 47770);
+        assert_eq!(cfg.policy_path, PathBuf::from("fabric-policy.json"));
     }
 }

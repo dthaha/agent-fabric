@@ -39,6 +39,7 @@ async fn main() -> Result<()> {
     info!("context store ready (WAL mode)");
 
     let state = DaemonState::new(cfg.clone(), store);
+    load_policy(&state);
 
     #[cfg(feature = "enterprise")]
     info!("enterprise features compiled in (mdm, audit-siem, ha, private-registry)");
@@ -66,4 +67,31 @@ async fn main() -> Result<()> {
         .context("health server error")?;
     info!("shutdown complete");
     Ok(())
+}
+
+/// Load the endpoint policy from disk at startup. A missing file is not
+/// fatal: the daemon starts with an empty PolicyStore, whose fail-closed
+/// gate denies everything until policy arrives.
+fn load_policy(state: &DaemonState) {
+    let path = &state.cfg.policy_path;
+    if !path.exists() {
+        warn!(
+            path = %path.display(),
+            "no endpoint policy found — starting fail-closed (everything denied)"
+        );
+        return;
+    }
+    let mut policy = state.policy.write().expect("policy lock poisoned");
+    match policy.load_endpoint_from_file(path) {
+        Ok(()) => info!(
+            path = %path.display(),
+            version = policy.endpoint_version().unwrap_or(""),
+            "endpoint policy loaded"
+        ),
+        Err(e) => warn!(
+            path = %path.display(),
+            error = %e,
+            "failed to load endpoint policy — starting fail-closed"
+        ),
+    }
 }
