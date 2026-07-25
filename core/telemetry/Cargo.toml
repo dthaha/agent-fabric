@@ -1,0 +1,17 @@
+[package]
+name = "fabric-telemetry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "trace", "logs"] }
+opentelemetry-semantic-conventions = "0.31"
+tracing.workspace = true
+tracing-opentelemetry = "0.32"
+tracing-subscriber = { workspace = true, features = ["env-filter", "json", "registry", "fmt"] }
+tokio.workspace = true
+thiserror.workspace = true

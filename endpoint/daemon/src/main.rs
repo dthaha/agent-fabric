@@ -13,18 +13,17 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
-use tracing_subscriber::EnvFilter;
 
 use crate::config::DaemonConfig;
 use crate::state::DaemonState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    let telemetry = fabric_telemetry::init_telemetry(fabric_telemetry::TelemetryConfig {
+        service_name: "fabric-endpoint-daemon".into(),
+        service_version: env!("CARGO_PKG_VERSION").into(),
+    })
+    .context("initializing telemetry")?;
 
     let cfg = DaemonConfig::load()?;
     info!(
@@ -81,6 +80,7 @@ async fn main() -> Result<()> {
         Err(_) => warn!("state still referenced at shutdown; skipping explicit store close"),
     }
     info!("shutdown complete");
+    telemetry.shutdown().context("shutting down telemetry")?;
     Ok(())
 }
 

@@ -5,9 +5,14 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "fabric-hosted"
+path = "src/main.rs"
+
 [dependencies]
 fabric-context = { path = "../../core/context" }
 fabric-policy = { path = "../../core/policy" }
+fabric-telemetry = { path = "../../core/telemetry" }
 anyhow.workspace = true
 async-trait.workspace = true
 serde.workspace = true

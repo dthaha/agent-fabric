@@ -177,6 +177,12 @@ Each org/user binds a container image and registry credentials in their policy p
 
 The fabric pulls the image, creates an ephemeral container with the specified resource limits, executes the command, streams output, and tears down. The image is the customer's artifact — the fabric never owns it.
 
+## Observability
+
+The fabric emits OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to ship traces to your backend (Tempo, Jaeger, Honeycomb, Datadog, etc.). Structured JSON logs always go to stdout for your collector. The fabric ships no log backend and no vendor SDK — you own the pipeline.
+
+`RUST_LOG` controls verbosity (default `info`). Tool dispatch spans carry `request_id`, `session_id`, `lease_id`, and `tool_name` so traces correlate end-to-end across the tool plane.
+
 ## License
 
 All code in this repository is [Apache-2.0](LICENSE). VyOS-style model: the code is fully open; the commercial product is signed binaries + SLA + support, not code access. Enterprise features are compile-time cargo feature flags, never runtime paywalls.

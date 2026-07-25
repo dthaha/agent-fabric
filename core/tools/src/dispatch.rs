@@ -101,6 +101,16 @@ impl ToolDispatcher {
     /// 2. Look up tool in registry
     /// 3. Execute
     /// 4. Return ToolResponse with executed_on field
+    #[tracing::instrument(
+        name = "tool.dispatch",
+        skip_all,
+        fields(
+            request_id = %request.request_id,
+            session_id = %request.session_id,
+            lease_id = %request.lease_id,
+            tool_name = %request.tool_name,
+        )
+    )]
     pub async fn dispatch(&self, request: ToolRequest) -> Result<ToolResponse, ToolError> {
         debug!("dispatching tool request: {}", request.tool_name);
 
