@@ -22,7 +22,7 @@ Agent Fabric solves one problem: **strict session context continuity across loci
 3. Memory plane         — NO LEASE. Hosted SoT (Honcho-class) + opportunistic endpoint cache.
 4. Context plane        — LEASED. Single-writer op-log. THE SPINE.
 5. Runtime plane        — LEASED with context. Who runs the loop this turn.
-6. Tool plane           — device-sticky, NO LEASE. Remote bridge for hosted brain. CUA lives here.
+6. Tool plane           — location-transparent. Same interface at every locus. Terminal = catch-all, CUA = escape hatch.
 7. Inference plane      — swappable commodity. Hosted = admin-configured. Endpoint = seeded.
 8. Model plane          — endpoint seeding. OS-native runtimes behind unified catalog.
 9. Agent integration    — adapter (BYO) + day-0 harness (full features).
@@ -31,11 +31,11 @@ Agent Fabric solves one problem: **strict session context continuity across loci
 ### Key invariants
 
 - Context is leased (single writer); memory is NOT
-- Tools are device-sticky; brain is movable
+- Tools are location-transparent; the brain never knows where a tool ran
 - Policy deny-wins: endpoint can tighten, NEVER loosen
 - Offline classifier lives ON the endpoint (never calls home to decide where to think)
 - Endpoint models are seeded per-OS runtime (MLX mac, ONNX win, llama.cpp linux)
-- CUA actuator stays on endpoint; hosted brain calls it via authenticated tool bridge
+- The container image IS the capability manifest — same image at every locus
 - Handoff = transfer write lease + catch-up, NOT summarize-and-restart
 
 ## Repo layout
@@ -125,6 +125,57 @@ All parsers implement the `SafetyParser` trait. Adding a new model = implement o
 ### Endpoint-side (future)
 
 When the endpoint daemon runs client-side, the safety model is seeded locally via the model catalog and inferred on-device through llama.cpp. Same `SafetyVerdict` schema, same policy rules — but inference is local, no round-trip to hosted. The endpoint never calls home to decide if content is safe.
+
+## Tool plane
+
+Tools behave the same way regardless of where the brain runs. The brain calls `execute(ToolRequest)` and gets a `ToolResponse`. It never knows whether the tool ran on the endpoint or in a hosted container.
+
+**Tool hierarchy:**
+
+1. **Structured tools** (API/SDK) — Salesforce, Jira, Snowflake, internal APIs. Already centralized, reachable from any locus.
+2. **Terminal** (catch-all) — sandboxed container shell. Anything with a CLI (~95% of enterprise work).
+3. **Computer use** (escape hatch) — GUI-only legacy apps with no API or CLI. Out of scope until endpoint-side.
+
+### Terminal tool
+
+The terminal tool runs commands in an ephemeral OCI container. The org publishes one image with their tools (`kubectl`, `terraform`, `gh`, `aws-cli`, etc.), and the fabric runs it identically at every locus:
+
+| Deployment | Runtime | Multi-host? |
+|---|---|---|
+| Enterprise server | Customer's K8s cluster | Yes — scheduler handles placement |
+| Dev / CI | minikube | Single-node, same K8s API |
+| Endpoint (future) | containerd direct (k3s or bare) | N/A — one device |
+
+The container image is the capability manifest. `kubectl` is in the image or it isn't. No drift between loci.
+
+### Dependencies
+
+**Server-side requires a Kubernetes cluster.** The fabric talks to the K8s API (via [kube-rs](https://github.com/kube-rs/kube)) to create ephemeral containers for terminal execution. The fabric does not schedule containers — the cluster's scheduler handles placement. The fabric does not own the cluster — the customer does.
+
+For development, [minikube](https://minikube.sigs.k8s.io/) provides a single-node K8s cluster locally.
+
+**Endpoint-side (future)** talks to containerd directly via gRPC — no scheduler needed on a single device. macOS endpoints use Apple's OCI-compatible container runtime or Docker Desktop's embedded containerd.
+
+### Container registry binding
+
+Each org/user binds a container image and registry credentials in their policy pack:
+
+```jsonc
+{
+  "terminal": {
+    "image": "registry.customer.com/fabric/sandbox:latest",
+    "registry_auth": "vault://org/registry-token",
+    "resources": {
+      "cpu": "2",
+      "memory": "4g",
+      "network": "restricted",
+      "timeout_s": 300
+    }
+  }
+}
+```
+
+The fabric pulls the image, creates an ephemeral container with the specified resource limits, executes the command, streams output, and tears down. The image is the customer's artifact — the fabric never owns it.
 
 ## License
 
