@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn kill_switch_engages() {
-        let mut gate = allow_all_gate();
+        let gate = allow_all_gate();
         gate.effective().clone().kill_switch = true;
 
         let mut registry = ToolRegistry::new();
