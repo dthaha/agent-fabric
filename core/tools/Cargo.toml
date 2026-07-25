@@ -21,6 +21,3 @@ kube.workspace = true
 k8s-openapi.workspace = true
 chrono.workspace = true
 uuid.workspace = true
-tokio-stream.workspace = true
-futures.workspace = true
-http.workspace = true

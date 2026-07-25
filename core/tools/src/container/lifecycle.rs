@@ -3,15 +3,21 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::container::{ContainerError, ContainerId, ContainerRuntime, ContainerSpec};
+
+/// Number of consecutive teardown failures after which the reaper gives up
+/// and drops the entry from tracking.
+const MAX_TEARDOWN_FAILURES: u32 = 3;
 
 pub struct ContainerLease {
     pub id: ContainerId,
     pub session_id: String,
     pub created_at: Instant,
     pub ttl: Duration,
+    /// Consecutive teardown failures observed by the reaper.
+    pub teardown_failures: u32,
 }
 
 impl ContainerLease {
@@ -43,28 +49,67 @@ impl ContainerLifecycle {
         spec: &ContainerSpec,
         ttl: Duration,
     ) -> Result<ContainerId, ContainerError> {
-        let mut active = self.active.lock().await;
-
-        // Check for a reusable container for this session
-        for lease in active.values() {
-            if lease.session_id == session_id && !lease.is_expired() {
-                debug!("reusing container {} for session {}", lease.id, session_id);
-                return Ok(lease.id.clone());
+        // Check for a reusable container for this session (lock released
+        // before the create call so we never hold it across an await).
+        {
+            let active = self.active.lock().await;
+            for lease in active.values() {
+                if lease.session_id == session_id && !lease.is_expired() {
+                    debug!("reusing container {} for session {}", lease.id, session_id);
+                    return Ok(lease.id.clone());
+                }
             }
         }
 
-        // Create a new container
+        // Create a new container outside the lock.
         let id = self.runtime.create(spec).await?;
+
+        // Re-lock and re-check: another task may have created a container
+        // for this session while we were creating ours.
+        let mut active = self.active.lock().await;
+        for lease in active.values() {
+            if lease.session_id == session_id && !lease.is_expired() {
+                let existing = lease.id.clone();
+                drop(active);
+                warn!(
+                    "container {} created concurrently for session {}; tearing down duplicate {}",
+                    existing, session_id, id
+                );
+                if let Err(e) = self.runtime.teardown(&id).await {
+                    warn!("failed to tear down duplicate container {id}: {e}");
+                }
+                return Ok(existing);
+            }
+        }
+
         let lease = ContainerLease {
             id: id.clone(),
             session_id: session_id.to_string(),
             created_at: Instant::now(),
             ttl,
+            teardown_failures: 0,
         };
 
         debug!("created container {} for session {}", id, session_id);
         active.insert(id.clone(), lease);
         Ok(id)
+    }
+
+    /// Register an externally created container for TTL-based reaping.
+    /// Used as a safety net so leaked containers are eventually cleaned up.
+    pub async fn register(&self, id: ContainerId, session_id: &str, ttl: Duration) {
+        let mut active = self.active.lock().await;
+        debug!("registered container {} for session {}", id, session_id);
+        active.insert(
+            id.clone(),
+            ContainerLease {
+                id,
+                session_id: session_id.to_string(),
+                created_at: Instant::now(),
+                ttl,
+                teardown_failures: 0,
+            },
+        );
     }
 
     /// Release a container back (marks for teardown after TTL).
@@ -118,11 +163,30 @@ impl ContainerLifecycle {
         let count = expired_ids.len();
         for id in &expired_ids {
             warn!("reaping expired container {}", id);
-            if let Err(e) = self.runtime.teardown(id).await {
-                warn!("failed to tear down expired container {id}: {e}");
+            match self.runtime.teardown(id).await {
+                Ok(()) => {
+                    let mut active = self.active.lock().await;
+                    active.remove(id);
+                }
+                Err(e) => {
+                    let mut active = self.active.lock().await;
+                    if let Some(lease) = active.get_mut(id) {
+                        lease.teardown_failures += 1;
+                        if lease.teardown_failures >= MAX_TEARDOWN_FAILURES {
+                            error!(
+                                "teardown of container {id} failed {} times; giving up: {e}",
+                                lease.teardown_failures
+                            );
+                            active.remove(id);
+                        } else {
+                            warn!(
+                                "failed to tear down expired container {id} (attempt {}): {e}",
+                                lease.teardown_failures
+                            );
+                        }
+                    }
+                }
             }
-            let mut active = self.active.lock().await;
-            active.remove(id);
         }
 
         Ok(count)
@@ -173,7 +237,7 @@ mod tests {
 
         async fn create(&self, spec: &ContainerSpec) -> Result<ContainerId, ContainerError> {
             self.create_count.fetch_add(1, Ordering::SeqCst);
-            Ok(ContainerId(spec.name.clone()))
+            Ok(ContainerId(spec.namespace.clone(), spec.name.clone()))
         }
 
         async fn exec(
@@ -208,6 +272,7 @@ mod tests {
             network_policy: NetworkPolicy::None,
             timeout_s: 30,
             env: HashMap::new(),
+            allowed_registries: vec![],
         }
     }
 
@@ -221,7 +286,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(id.0, "test-1");
+        assert_eq!(id.1, "test-1");
         assert_eq!(runtime.create_count.load(Ordering::SeqCst), 1);
     }
 
@@ -310,5 +375,70 @@ mod tests {
         assert_eq!(reaped, 1);
         assert_eq!(runtime.teardown_count.load(Ordering::SeqCst), 1);
         assert_eq!(lifecycle.active_count().await, 0);
+    }
+
+    struct FailingTeardownRuntime {
+        teardown_count: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ContainerRuntime for FailingTeardownRuntime {
+        async fn pull(
+            &self,
+            _image: &str,
+            _auth: Option<&RegistryAuth>,
+        ) -> Result<ImageRef, ContainerError> {
+            Ok("test-image".into())
+        }
+
+        async fn create(&self, spec: &ContainerSpec) -> Result<ContainerId, ContainerError> {
+            Ok(ContainerId(spec.namespace.clone(), spec.name.clone()))
+        }
+
+        async fn exec(
+            &self,
+            _id: &ContainerId,
+            _cmd: &ExecSpec,
+        ) -> Result<ExecOutput, ContainerError> {
+            Ok(ExecOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+            })
+        }
+
+        async fn teardown(&self, _id: &ContainerId) -> Result<(), ContainerError> {
+            self.teardown_count.fetch_add(1, Ordering::SeqCst);
+            Err(ContainerError::TeardownFailed("simulated failure".into()))
+        }
+
+        async fn list(&self, _filter: &ListFilter) -> Result<Vec<ContainerInfo>, ContainerError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn reaper_retries_failed_teardowns_then_gives_up() {
+        let runtime = Arc::new(FailingTeardownRuntime {
+            teardown_count: AtomicUsize::new(0),
+        });
+        let lifecycle = ContainerLifecycle::new(runtime.clone());
+
+        lifecycle
+            .acquire("session-1", &test_spec("test-1"), Duration::from_millis(1))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // First two reaps: teardown fails, entry is retained.
+        lifecycle.reap_expired().await.unwrap();
+        assert_eq!(lifecycle.active_count().await, 1);
+        lifecycle.reap_expired().await.unwrap();
+        assert_eq!(lifecycle.active_count().await, 1);
+
+        // Third failure: entry is dropped from tracking.
+        lifecycle.reap_expired().await.unwrap();
+        assert_eq!(lifecycle.active_count().await, 0);
+        assert_eq!(runtime.teardown_count.load(Ordering::SeqCst), 3);
     }
 }

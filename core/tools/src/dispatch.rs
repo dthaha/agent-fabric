@@ -104,6 +104,15 @@ impl ToolDispatcher {
     pub async fn dispatch(&self, request: ToolRequest) -> Result<ToolResponse, ToolError> {
         debug!("dispatching tool request: {}", request.tool_name);
 
+        // 0. Lease validation: every tool call must carry a valid context
+        // lease ID. Validation is minimal (non-empty) — full lease
+        // verification against the context plane happens at the session
+        // layer; the dispatcher fails closed on a missing lease.
+        if request.lease_id.is_empty() {
+            warn!("tool '{}' rejected: missing lease_id", request.tool_name);
+            return Err(ToolError::PolicyDenied("missing lease_id".into()));
+        }
+
         // 1. Policy gate check
         let decision = self.policy_gate.check_tool(&request.tool_name);
         match &decision {
@@ -324,26 +333,54 @@ mod tests {
         assert!(matches!(err, ToolError::Execution(_)));
     }
 
+    fn kill_switch_gate() -> PolicyGate {
+        PolicyGate::new(EffectivePolicy {
+            endpoint_version: "test".into(),
+            hosted_version: "test".into(),
+            data_rules: vec![],
+            tool_rules: vec![ToolRule {
+                tool_pattern: "*".into(),
+                action: ToolAction::Allow as i32,
+                condition: String::new(),
+            }],
+            model_rules: vec![],
+            cua: None,
+            inference_rules: vec![],
+            kill_switch: true,
+            max_retention_hours: 0,
+            background_quota: None,
+            max_session_duration_hours: 0,
+            max_concurrent_sessions: 0,
+        })
+    }
+
     #[tokio::test]
     async fn kill_switch_engages() {
-        let gate = allow_all_gate();
-        gate.effective().clone().kill_switch = true;
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(MockTool::new("shell.exec")))
+            .unwrap();
 
+        let dispatcher = ToolDispatcher::new(registry, kill_switch_gate());
+        let err = dispatcher
+            .dispatch(make_request("shell.exec"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn empty_lease_id_denied() {
         let mut registry = ToolRegistry::new();
         registry
             .register(Box::new(MockTool::new("shell.exec")))
             .unwrap();
 
         let dispatcher = ToolDispatcher::new(registry, allow_all_gate());
-
-        // Can't easily set kill_switch since PolicyGate doesn't expose it mutable,
-        // but we ensure that the policy gate is constructed correctly
-        // and the tests pass
-        let resp = dispatcher
-            .dispatch(make_request("shell.exec"))
-            .await
-            .unwrap();
-        assert!(resp.success);
+        let mut request = make_request("shell.exec");
+        request.lease_id = String::new();
+        let err = dispatcher.dispatch(request).await.unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)));
     }
 
     #[tokio::test]

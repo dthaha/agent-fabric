@@ -3,9 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use fabric_classifier::safety::client::SafetyClient;
-use fabric_classifier::safety::{
-    SafetyAction, SafetyCategory, SafetyLevel, SafetyVerdict,
-};
+use fabric_classifier::safety::{SafetyAction, SafetyCategory, SafetyLevel, SafetyVerdict};
 use fabric_classifier::safety::{SafetyParser, SafetyPolicyEnforcer};
 use fabric_types::policy::{SafetyAction as ProtoSafetyAction, SafetyConfig, SafetyPolicyRule};
 

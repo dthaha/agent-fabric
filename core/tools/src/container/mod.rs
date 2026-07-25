@@ -29,12 +29,13 @@ pub enum ContainerError {
 
 pub type ImageRef = String;
 
+/// Identifies a container: `.0` is the namespace, `.1` is the name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ContainerId(pub String);
+pub struct ContainerId(pub String, pub String);
 
 impl std::fmt::Display for ContainerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}/{}", self.0, self.1)
     }
 }
 
@@ -48,6 +49,41 @@ pub struct ContainerSpec {
     pub network_policy: NetworkPolicy,
     pub timeout_s: u64,
     pub env: HashMap<String, String>,
+    /// Registry allowlist. Empty means all registries are allowed
+    /// (backward compatible). When non-empty, the image's registry must
+    /// match one of the entries; images without an explicit registry are
+    /// treated as `docker.io`.
+    pub allowed_registries: Vec<String>,
+}
+
+/// Extract the registry host from an image reference. Images without an
+/// explicit registry (e.g. `ubuntu:22.04`) default to `docker.io`.
+pub fn image_registry(image: &str) -> &str {
+    let first = image.split('/').next().unwrap_or("");
+    if first.contains('.') || first.contains(':') || first == "localhost" {
+        first
+    } else {
+        "docker.io"
+    }
+}
+
+/// Validate an image against a registry allowlist. Empty allowlist allows
+/// everything.
+pub fn validate_image_allowed(
+    image: &str,
+    allowed_registries: &[String],
+) -> Result<(), ContainerError> {
+    if allowed_registries.is_empty() {
+        return Ok(());
+    }
+    let registry = image_registry(image);
+    if allowed_registries.iter().any(|r| r == registry) {
+        Ok(())
+    } else {
+        Err(ContainerError::ImagePull(format!(
+            "image '{image}' registry '{registry}' is not in the allowed registries: {allowed_registries:?}"
+        )))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -64,11 +100,21 @@ pub struct ExecOutput {
     pub exit_code: i32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RegistryAuth {
     pub username: String,
     pub password: String,
     pub registry: String,
+}
+
+impl std::fmt::Debug for RegistryAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegistryAuth")
+            .field("username", &self.username)
+            .field("registry", &self.registry)
+            .field("password", &"***REDACTED***")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

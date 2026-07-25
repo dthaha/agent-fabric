@@ -1,21 +1,33 @@
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{Container, EnvVar, PodSpec, ResourceRequirements};
+use k8s_openapi::api::core::v1::{
+    Capabilities, Container, EmptyDirVolumeSource, EnvVar, LocalObjectReference, Pod,
+    PodSecurityContext, PodSpec, ResourceRequirements, SeccompProfile, Secret, SecurityContext,
+    Volume, VolumeMount,
+};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use kube::api::{Api, DeleteParams, ListParams, PostParams};
+use kube::api::{Api, AttachParams, DeleteParams, ListParams, PostParams};
 use kube::Client;
+use tokio::io::AsyncReadExt;
 use tracing::{debug, info};
 
 use crate::container::{
-    ContainerError, ContainerId, ContainerInfo, ContainerRuntime, ContainerSpec, ExecOutput,
-    ExecSpec, ImageRef, ListFilter, RegistryAuth,
+    validate_image_allowed, ContainerError, ContainerId, ContainerInfo, ContainerRuntime,
+    ContainerSpec, ExecOutput, ExecSpec, ImageRef, ListFilter, RegistryAuth,
 };
+
+/// Name of the dockerconfigjson pull secret created by `pull()` when
+/// registry auth is provided.
+const PULL_SECRET_NAME: &str = "fabric-registry-auth";
 
 /// Kubernetes container runtime backend. Connects via the default kubeconfig
 /// or in-cluster config. For dev, minikube sets up kubeconfig automatically.
+///
+/// Network isolation (NetworkPolicy) is NOT created by this runtime — that
+/// requires cluster-admin scope and is the cluster operator's responsibility.
 pub struct K8sRuntime {
     client: Client,
     default_namespace: String,
@@ -61,11 +73,90 @@ impl K8sRuntime {
         format!("fabric-{}", spec.name)
     }
 
-    fn pod_labels(id: &ContainerId) -> BTreeMap<String, String> {
+    fn pod_labels(name: &str) -> BTreeMap<String, String> {
         let mut labels = BTreeMap::new();
         labels.insert("app".into(), "fabric".into());
-        labels.insert("fabric/container".into(), id.0.clone());
+        labels.insert("fabric/container".into(), name.to_string());
         labels
+    }
+
+    /// Create (or update) a dockerconfigjson pull secret in the namespace.
+    async fn ensure_pull_secret(
+        &self,
+        namespace: &str,
+        auth: &RegistryAuth,
+    ) -> Result<(), ContainerError> {
+        let docker_config = serde_json::json!({
+            "auths": {
+                auth.registry.clone(): {
+                    "username": auth.username,
+                    "password": auth.password,
+                }
+            }
+        });
+
+        let secret = Secret {
+            metadata: ObjectMeta {
+                name: Some(PULL_SECRET_NAME.into()),
+                namespace: Some(namespace.into()),
+                ..Default::default()
+            },
+            type_: Some("kubernetes.io/dockerconfigjson".into()),
+            string_data: Some(BTreeMap::from([(
+                ".dockerconfigjson".into(),
+                docker_config.to_string(),
+            )])),
+            ..Default::default()
+        };
+
+        let secrets: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+        match secrets.create(&PostParams::default(), &secret).await {
+            Ok(_) => Ok(()),
+            Err(kube::Error::Api(resp)) if resp.code == 409 => {
+                // Already exists — replace it.
+                secrets
+                    .replace(PULL_SECRET_NAME, &PostParams::default(), &secret)
+                    .await
+                    .map_err(ContainerError::Kube)?;
+                Ok(())
+            }
+            Err(e) => Err(ContainerError::Kube(e)),
+        }
+    }
+
+    /// Reference the pull secret on the pod if it exists in the namespace.
+    async fn pull_secret_ref(&self, namespace: &str) -> Option<Vec<LocalObjectReference>> {
+        let secrets: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+        match secrets.get(PULL_SECRET_NAME).await {
+            Ok(_) => Some(vec![LocalObjectReference {
+                name: PULL_SECRET_NAME.into(),
+            }]),
+            Err(_) => None,
+        }
+    }
+
+    /// Wait until the pod is Running so exec can attach.
+    async fn wait_pod_running(pods: &Api<Pod>, name: &str) -> Result<(), ContainerError> {
+        for _ in 0..60 {
+            let pod = pods.get(name).await.map_err(ContainerError::Kube)?;
+            let phase = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.phase.clone())
+                .unwrap_or_default();
+            match phase.as_str() {
+                "Running" => return Ok(()),
+                "Failed" | "Succeeded" | "Unknown" => {
+                    return Err(ContainerError::ExecFailed(format!(
+                        "pod {name} entered terminal phase {phase} before exec"
+                    )));
+                }
+                _ => tokio::time::sleep(Duration::from_millis(500)).await,
+            }
+        }
+        Err(ContainerError::ExecFailed(format!(
+            "pod {name} did not reach Running phase in time"
+        )))
     }
 }
 
@@ -74,17 +165,27 @@ impl ContainerRuntime for K8sRuntime {
     async fn pull(
         &self,
         image: &str,
-        _auth: Option<&RegistryAuth>,
+        auth: Option<&RegistryAuth>,
     ) -> Result<ImageRef, ContainerError> {
+        if let Some(auth) = auth {
+            self.ensure_pull_secret(&self.default_namespace, auth)
+                .await?;
+            debug!(
+                "created pull secret {PULL_SECRET_NAME} for registry {}",
+                auth.registry
+            );
+        }
+        // The actual image pull is delegated to the kubelet on pod creation.
         info!("image pull delegated to K8s: {image}");
         Ok(image.to_string())
     }
 
     async fn create(&self, spec: &ContainerSpec) -> Result<ContainerId, ContainerError> {
+        validate_image_allowed(&spec.image, &spec.allowed_registries)?;
+
         let ns = self.ns(spec).to_string();
-        let container_name = Self::container_name(spec);
-        let id = ContainerId(container_name.clone());
-        let labels = Self::pod_labels(&id);
+        let pod_name = Self::container_name(spec);
+        let labels = Self::pod_labels(&pod_name);
 
         let env_vars: Vec<EnvVar> = spec
             .env
@@ -116,174 +217,134 @@ impl ContainerRuntime for K8sRuntime {
                 ])),
                 ..Default::default()
             }),
-            ..Default::default()
-        };
-
-        let job = Job {
-            metadata: ObjectMeta {
-                name: Some(container_name.clone()),
-                namespace: Some(ns.clone()),
-                labels: Some(labels.clone()),
-                ..Default::default()
-            },
-            spec: Some(k8s_openapi::api::batch::v1::JobSpec {
-                template: k8s_openapi::api::core::v1::PodTemplateSpec {
-                    metadata: Some(ObjectMeta {
-                        labels: Some(labels),
-                        ..Default::default()
-                    }),
-                    spec: Some(PodSpec {
-                        containers: vec![container],
-                        restart_policy: Some("Never".into()),
-                        ..Default::default()
-                    }),
-                },
-                active_deadline_seconds: Some(spec.timeout_s as i64),
-                backoff_limit: Some(0),
+            security_context: Some(SecurityContext {
+                allow_privilege_escalation: Some(false),
+                read_only_root_filesystem: Some(true),
+                capabilities: Some(Capabilities {
+                    drop: Some(vec!["ALL".into()]),
+                    ..Default::default()
+                }),
                 ..Default::default()
             }),
-            ..Default::default()
-        };
-
-        let jobs: Api<Job> = Api::namespaced(self.client.clone(), &ns);
-        jobs.create(&PostParams::default(), &job)
-            .await
-            .map_err(ContainerError::Kube)?;
-
-        debug!("created job {container_name} in namespace {ns}");
-        Ok(ContainerId(container_name))
-    }
-
-    async fn exec(&self, id: &ContainerId, cmd: &ExecSpec) -> Result<ExecOutput, ContainerError> {
-        let ns = "default".to_string();
-        let exec_job_name = format!(
-            "{}-exec-{}",
-            id.0,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        );
-        let labels = Self::pod_labels(id);
-
-        let env_vars: Vec<EnvVar> = cmd
-            .env
-            .iter()
-            .map(|(k, v)| EnvVar {
-                name: k.clone(),
-                value: Some(v.clone()),
+            volume_mounts: Some(vec![VolumeMount {
+                name: "tmp".into(),
+                mount_path: "/tmp".into(),
                 ..Default::default()
-            })
-            .collect();
-
-        let mut shell_args = vec!["/bin/sh".into(), "-c".into()];
-        let cmd_str = cmd.command.join(" ");
-        if let Some(wd) = &cmd.workdir {
-            shell_args.push(format!("cd {} && {} && echo __EXIT__=$?", wd, cmd_str));
-        } else {
-            shell_args.push(format!("{} && echo __EXIT__=$?", cmd_str));
-        }
-
-        let pod = Container {
-            name: "exec".into(),
-            image: Some("ubuntu:22.04".into()),
-            command: Some(shell_args),
-            env: if env_vars.is_empty() {
-                None
-            } else {
-                Some(env_vars)
-            },
+            }]),
             ..Default::default()
         };
 
-        let job = Job {
+        let image_pull_secrets = self.pull_secret_ref(&ns).await;
+
+        let pod = Pod {
             metadata: ObjectMeta {
-                name: Some(exec_job_name.clone()),
+                name: Some(pod_name.clone()),
                 namespace: Some(ns.clone()),
                 labels: Some(labels),
                 ..Default::default()
             },
-            spec: Some(k8s_openapi::api::batch::v1::JobSpec {
-                template: k8s_openapi::api::core::v1::PodTemplateSpec {
-                    metadata: Some(ObjectMeta {
-                        name: Some(exec_job_name.clone()),
+            spec: Some(PodSpec {
+                containers: vec![container],
+                restart_policy: Some("Never".into()),
+                automount_service_account_token: Some(false),
+                active_deadline_seconds: Some(spec.timeout_s as i64),
+                security_context: Some(PodSecurityContext {
+                    run_as_non_root: Some(true),
+                    run_as_user: Some(1000),
+                    seccomp_profile: Some(SeccompProfile {
+                        type_: "RuntimeDefault".into(),
                         ..Default::default()
                     }),
-                    spec: Some(PodSpec {
-                        containers: vec![pod],
-                        restart_policy: Some("Never".into()),
-                        ..Default::default()
-                    }),
-                },
-                active_deadline_seconds: Some(30),
-                backoff_limit: Some(0),
+                    ..Default::default()
+                }),
+                volumes: Some(vec![Volume {
+                    name: "tmp".into(),
+                    empty_dir: Some(EmptyDirVolumeSource::default()),
+                    ..Default::default()
+                }]),
+                image_pull_secrets,
                 ..Default::default()
             }),
             ..Default::default()
         };
 
-        let jobs: Api<Job> = Api::namespaced(self.client.clone(), &ns);
-        jobs.create(&PostParams::default(), &job)
+        let pods: Api<Pod> = Api::namespaced(self.client.clone(), &ns);
+        pods.create(&PostParams::default(), &pod)
             .await
-            .map_err(|e| ContainerError::ExecFailed(format!("failed to create exec job: {e}")))?;
+            .map_err(ContainerError::Kube)?;
 
-        // Wait for the job to complete
-        let job_api: Api<Job> = Api::namespaced(self.client.clone(), &ns);
-        let mut succeeded = false;
-        for _ in 0..60 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            if let Ok(j) = job_api.get(&exec_job_name).await {
-                if let Some(status) = &j.status {
-                    if status.succeeded == Some(1) {
-                        succeeded = true;
-                        break;
-                    }
-                    if status.failed == Some(1) {
-                        break;
-                    }
-                }
+        debug!("created pod {pod_name} in namespace {ns}");
+        Ok(ContainerId(ns, pod_name))
+    }
+
+    async fn exec(&self, id: &ContainerId, cmd: &ExecSpec) -> Result<ExecOutput, ContainerError> {
+        let pods: Api<Pod> = Api::namespaced(self.client.clone(), &id.0);
+
+        Self::wait_pod_running(&pods, &id.1).await?;
+
+        // Build argv. Never join command args into a shell string — pass argv
+        // directly to the exec API. Env vars are applied via `env(1)`; a
+        // workdir is applied via a fixed shell wrapper that receives the
+        // workdir and command as separate positional args (no injection).
+        let mut argv: Vec<String> = Vec::new();
+        if !cmd.env.is_empty() {
+            argv.push("env".into());
+            for (k, v) in &cmd.env {
+                argv.push(format!("{k}={v}"));
             }
         }
+        if let Some(wd) = &cmd.workdir {
+            argv.extend([
+                "/bin/sh".into(),
+                "-c".into(),
+                "cd \"$1\" && shift && exec \"$@\"".into(),
+                "sh".into(),
+                wd.clone(),
+            ]);
+        }
+        argv.extend(cmd.command.iter().cloned());
 
-        // Read pod logs by fetching the pod's log through the K8s API directly
-        let logs_url = format!(
-            "/api/v1/namespaces/{}/pods/{}/log?container=exec",
-            ns, exec_job_name
-        );
+        let ap = AttachParams {
+            stdout: true,
+            stderr: true,
+            ..Default::default()
+        };
 
-        let request = http::Request::get(&logs_url)
-            .body(Vec::<u8>::new())
-            .map_err(|e| ContainerError::ExecFailed(format!("failed to build request: {e}")))?;
-
-        let log_text: String = self
-            .client
-            .request(request)
+        let mut attached = pods
+            .exec(&id.1, argv, &ap)
             .await
-            .map_err(|e| ContainerError::ExecFailed(format!("K8s API request failed: {e}")))?;
+            .map_err(|e| ContainerError::ExecFailed(format!("failed to exec in pod: {e}")))?;
+
+        let mut stdout_reader = attached
+            .stdout()
+            .ok_or_else(|| ContainerError::ExecFailed("stdout stream unavailable".into()))?;
+        let mut stderr_reader = attached
+            .stderr()
+            .ok_or_else(|| ContainerError::ExecFailed("stderr stream unavailable".into()))?;
+        let status_fut = attached.take_status();
 
         let mut stdout = String::new();
-        let stderr = String::new();
-        let mut exit_code = 1;
+        let mut stderr = String::new();
+        let (out_res, err_res) = tokio::join!(
+            stdout_reader.read_to_string(&mut stdout),
+            stderr_reader.read_to_string(&mut stderr),
+        );
+        out_res.map_err(|e| ContainerError::ExecFailed(format!("failed to read stdout: {e}")))?;
+        err_res.map_err(|e| ContainerError::ExecFailed(format!("failed to read stderr: {e}")))?;
 
-        for line in log_text.lines() {
-            if let Some(code_str) = line.strip_prefix("__EXIT__=") {
-                if let Ok(code) = code_str.trim().parse::<i32>() {
-                    exit_code = code;
-                }
-            } else {
-                stdout.push_str(line);
-                stdout.push('\n');
-            }
-        }
-
-        if succeeded && exit_code == 1 {
-            exit_code = 0;
-        }
-
-        // Cleanup the exec job
-        jobs.delete(&exec_job_name, &DeleteParams::default())
-            .await
-            .ok();
+        // Real exit status from the exec stream: "Success" maps to 0,
+        // "Failure" maps to the reported status code (1 if absent/zero).
+        let exit_code = match status_fut {
+            Some(fut) => match fut.await {
+                Some(status) if status.status.as_deref() == Some("Success") => 0,
+                Some(status) => match status.code.unwrap_or(1) {
+                    0 => 1,
+                    code => code,
+                },
+                None => 0,
+            },
+            None => 0,
+        };
 
         Ok(ExecOutput {
             stdout,
@@ -293,13 +354,12 @@ impl ContainerRuntime for K8sRuntime {
     }
 
     async fn teardown(&self, id: &ContainerId) -> Result<(), ContainerError> {
-        let ns = "default".to_string();
-        let jobs: Api<Job> = Api::namespaced(self.client.clone(), &ns);
-        jobs.delete(&id.0, &DeleteParams::default())
+        let pods: Api<Pod> = Api::namespaced(self.client.clone(), &id.0);
+        pods.delete(&id.1, &DeleteParams::default())
             .await
-            .map_err(|e| ContainerError::TeardownFailed(format!("delete job failed: {e}")))?;
+            .map_err(|e| ContainerError::TeardownFailed(format!("delete pod failed: {e}")))?;
 
-        debug!("deleted job {}", id.0);
+        debug!("deleted pod {} in namespace {}", id.1, id.0);
         Ok(())
     }
 
@@ -309,7 +369,7 @@ impl ContainerRuntime for K8sRuntime {
             .clone()
             .unwrap_or_else(|| self.default_namespace.clone());
 
-        let jobs: Api<Job> = Api::namespaced(self.client.clone(), &ns);
+        let pods: Api<Pod> = Api::namespaced(self.client.clone(), &ns);
 
         let lp = if filter.labels.is_empty() {
             ListParams::default()
@@ -323,24 +383,28 @@ impl ContainerRuntime for K8sRuntime {
             ListParams::default().labels(&label_selector)
         };
 
-        let job_list = jobs.list(&lp).await.map_err(ContainerError::Kube)?;
+        let pod_list = pods.list(&lp).await.map_err(ContainerError::Kube)?;
 
         let mut result = Vec::new();
-        for item in job_list.items {
+        for item in pod_list.items {
             let name = item.metadata.name.unwrap_or_default();
             let image = item
                 .spec
                 .as_ref()
-                .and_then(|s| s.template.spec.as_ref())
                 .and_then(|ps| ps.containers.first())
                 .and_then(|c| c.image.clone())
                 .unwrap_or_default();
+            let status = item
+                .status
+                .as_ref()
+                .and_then(|s| s.phase.clone())
+                .unwrap_or_else(|| "unknown".into());
             result.push(ContainerInfo {
-                id: ContainerId(name.clone()),
+                id: ContainerId(ns.clone(), name.clone()),
                 name,
                 namespace: ns.clone(),
                 image,
-                status: "active".into(),
+                status,
             });
         }
 

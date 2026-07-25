@@ -9,6 +9,7 @@ use pbjson_types::{Struct, Value};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
+use crate::container::lifecycle::ContainerLifecycle;
 use crate::container::{ContainerRuntime, ContainerSpec, ExecSpec, NetworkPolicy, RegistryAuth};
 use crate::dispatch::{Tool, ToolError};
 
@@ -21,6 +22,7 @@ pub struct TerminalConfig {
     pub network_policy: NetworkPolicy,
     pub timeout_s: u64,
     pub namespace: String,
+    pub allowed_registries: Vec<String>,
 }
 
 impl Default for TerminalConfig {
@@ -33,6 +35,7 @@ impl Default for TerminalConfig {
             network_policy: NetworkPolicy::None,
             timeout_s: 30,
             namespace: "default".into(),
+            allowed_registries: vec![],
         }
     }
 }
@@ -41,11 +44,23 @@ impl Default for TerminalConfig {
 pub struct TerminalTool {
     runtime: Arc<dyn ContainerRuntime>,
     config: TerminalConfig,
+    lifecycle: Option<Arc<ContainerLifecycle>>,
 }
 
 impl TerminalTool {
     pub fn new(runtime: Arc<dyn ContainerRuntime>, config: TerminalConfig) -> Self {
-        Self { runtime, config }
+        Self {
+            runtime,
+            config,
+            lifecycle: None,
+        }
+    }
+
+    /// Attach a container lifecycle manager. Containers are registered for
+    /// TTL-based reaping as a safety net in addition to eager teardown.
+    pub fn with_lifecycle(mut self, lifecycle: Arc<ContainerLifecycle>) -> Self {
+        self.lifecycle = Some(lifecycle);
+        self
     }
 
     async fn execute_command(
@@ -65,6 +80,7 @@ impl TerminalTool {
             network_policy: self.config.network_policy.clone(),
             timeout_s: self.config.timeout_s,
             env: env.clone(),
+            allowed_registries: self.config.allowed_registries.clone(),
         };
 
         // 1. Create ephemeral container
@@ -75,6 +91,17 @@ impl TerminalTool {
             .await
             .map_err(|e| ToolError::Execution(format!("failed to create container: {e}")))?;
 
+        // Register for TTL-based reaping as a safety net against leaks.
+        if let Some(lifecycle) = &self.lifecycle {
+            lifecycle
+                .register(
+                    container_id.clone(),
+                    &request.session_id,
+                    std::time::Duration::from_secs(self.config.timeout_s.max(60)),
+                )
+                .await;
+        }
+
         // 2. Exec the command
         let exec_spec = ExecSpec {
             command,
@@ -83,13 +110,23 @@ impl TerminalTool {
         };
 
         debug!("executing command in container {container_id}");
-        let exec_result = self
-            .runtime
-            .exec(&container_id, &exec_spec)
-            .await
-            .map_err(|e| ToolError::Execution(format!("exec failed: {e}")))?;
+        let exec_result = self.runtime.exec(&container_id, &exec_spec).await;
 
-        // 3. Capture output
+        // 3. Guaranteed teardown on both success and failure. When a
+        // lifecycle manager is attached, tear down through it so the entry
+        // is also removed from tracking.
+        if let Some(lifecycle) = &self.lifecycle {
+            if let Err(e) = lifecycle.teardown(&container_id).await {
+                error!(error = %e, "teardown failed after exec");
+            }
+        } else if let Err(e) = self.runtime.teardown(&container_id).await {
+            error!(error = %e, "teardown failed after exec");
+        }
+
+        let exec_result =
+            exec_result.map_err(|e| ToolError::Execution(format!("exec failed: {e}")))?;
+
+        // 4. Capture output
         let success = exec_result.exit_code == 0;
         let mut fields = HashMap::new();
         fields.insert(
@@ -116,11 +153,6 @@ impl TerminalTool {
         } else {
             String::new()
         };
-
-        // 4. Teardown container
-        if let Err(e) = self.runtime.teardown(&container_id).await {
-            error!("failed to teardown container {container_id}: {e}");
-        }
 
         info!(
             "terminal command completed (exit_code={}, success={})",
@@ -270,7 +302,7 @@ mod tests {
         }
 
         async fn create(&self, spec: &ContainerSpec) -> Result<ContainerId, ContainerError> {
-            Ok(ContainerId(spec.name.clone()))
+            Ok(ContainerId(spec.namespace.clone(), spec.name.clone()))
         }
 
         async fn exec(
