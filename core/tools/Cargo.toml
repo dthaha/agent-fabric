@@ -6,9 +6,21 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-fabric-context = { path = "../context" }
+fabric-types = { path = "../types" }
+fabric-policy = { path = "../policy" }
+prost.workspace = true
+prost-types.workspace = true
+pbjson-types.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tokio.workspace = true
+kube.workspace = true
+k8s-openapi.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+http.workspace = true
