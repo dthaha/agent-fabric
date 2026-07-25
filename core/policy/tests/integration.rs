@@ -36,6 +36,7 @@ fn endpoint_policy(version: &str, kill_switch: bool, cua_allowed: bool) -> Endpo
             regex: r"\b\d{3}-\d{2}-\d{4}\b".into(),
             action: DlpAction::Redact as i32,
         }],
+        safety: None,
     }
 }
 

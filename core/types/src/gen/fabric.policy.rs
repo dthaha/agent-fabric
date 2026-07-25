@@ -25,6 +25,8 @@ pub struct EndpointPolicy {
     pub max_retention_hours: u32,
     #[prost(message, repeated, tag="10")]
     pub dlp_patterns: ::prost::alloc::vec::Vec<DlpPattern>,
+    #[prost(message, optional, tag="11")]
+    pub safety: ::core::option::Option<SafetyConfig>,
 }
 /// Hosted policy: additive rules applied by the hosted runtime. Never loosens
 /// the endpoint ceiling.
@@ -222,6 +224,86 @@ impl DlpAction {
             "DLP_ACTION_REDACT" => Some(Self::Redact),
             "DLP_ACTION_BLOCK" => Some(Self::Block),
             "DLP_ACTION_LOG_ONLY" => Some(Self::LogOnly),
+            _ => None,
+        }
+    }
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SafetyConfig {
+    #[prost(string, tag="1")]
+    pub endpoint_url: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub model: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub parser: ::prost::alloc::string::String,
+    #[prost(uint32, tag="4")]
+    pub timeout_ms: u32,
+    #[prost(enumeration="FailMode", tag="5")]
+    pub fail_mode: i32,
+    #[prost(message, repeated, tag="6")]
+    pub rules: ::prost::alloc::vec::Vec<SafetyPolicyRule>,
+    #[prost(enumeration="SafetyAction", tag="7")]
+    pub default_action: i32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SafetyPolicyRule {
+    #[prost(string, tag="1")]
+    pub category: ::prost::alloc::string::String,
+    #[prost(enumeration="SafetyAction", tag="2")]
+    pub action: i32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum SafetyAction {
+    Unspecified = 0,
+    Allow = 1,
+    Warn = 2,
+    ForceEndpoint = 3,
+    Block = 4,
+}
+impl SafetyAction {
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            SafetyAction::Unspecified => "SAFETY_ACTION_UNSPECIFIED",
+            SafetyAction::Allow => "SAFETY_ACTION_ALLOW",
+            SafetyAction::Warn => "SAFETY_ACTION_WARN",
+            SafetyAction::ForceEndpoint => "SAFETY_ACTION_FORCE_ENDPOINT",
+            SafetyAction::Block => "SAFETY_ACTION_BLOCK",
+        }
+    }
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "SAFETY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "SAFETY_ACTION_ALLOW" => Some(Self::Allow),
+            "SAFETY_ACTION_WARN" => Some(Self::Warn),
+            "SAFETY_ACTION_FORCE_ENDPOINT" => Some(Self::ForceEndpoint),
+            "SAFETY_ACTION_BLOCK" => Some(Self::Block),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum FailMode {
+    Unspecified = 0,
+    Closed = 1,
+    Open = 2,
+}
+impl FailMode {
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            FailMode::Unspecified => "FAIL_MODE_UNSPECIFIED",
+            FailMode::Closed => "FAIL_MODE_CLOSED",
+            FailMode::Open => "FAIL_MODE_OPEN",
+        }
+    }
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "FAIL_MODE_UNSPECIFIED" => Some(Self::Unspecified),
+            "FAIL_MODE_CLOSED" => Some(Self::Closed),
+            "FAIL_MODE_OPEN" => Some(Self::Open),
             _ => None,
         }
     }

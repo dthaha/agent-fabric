@@ -154,6 +154,7 @@ mod tests {
             kill_switch: false,
             max_retention_hours: 0,
             dlp_patterns: vec![],
+            safety: None,
         }
     }
 

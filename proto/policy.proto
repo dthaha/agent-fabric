@@ -15,6 +15,7 @@ message EndpointPolicy {
   bool kill_switch = 8;
   uint32 max_retention_hours = 9;
   repeated DlpPattern dlp_patterns = 10;
+  SafetyConfig safety = 11;
 }
 
 // Hosted policy: additive rules applied by the hosted runtime. Never loosens
@@ -77,6 +78,35 @@ enum DlpAction {
   DLP_ACTION_REDACT = 1;
   DLP_ACTION_BLOCK = 2;
   DLP_ACTION_LOG_ONLY = 3;
+}
+
+message SafetyConfig {
+  string endpoint_url = 1;
+  string model = 2;
+  string parser = 3;
+  uint32 timeout_ms = 4;
+  FailMode fail_mode = 5;
+  repeated SafetyPolicyRule rules = 6;
+  SafetyAction default_action = 7;
+}
+
+message SafetyPolicyRule {
+  string category = 1;
+  SafetyAction action = 2;
+}
+
+enum SafetyAction {
+  SAFETY_ACTION_UNSPECIFIED = 0;
+  SAFETY_ACTION_ALLOW = 1;
+  SAFETY_ACTION_WARN = 2;
+  SAFETY_ACTION_FORCE_ENDPOINT = 3;
+  SAFETY_ACTION_BLOCK = 4;
+}
+
+enum FailMode {
+  FAIL_MODE_UNSPECIFIED = 0;
+  FAIL_MODE_CLOSED = 1;
+  FAIL_MODE_OPEN = 2;
 }
 
 message InferenceRule {

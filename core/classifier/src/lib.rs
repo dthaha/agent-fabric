@@ -21,6 +21,7 @@ use fabric_types::context::Locus;
 
 pub mod policy;
 pub mod rules;
+pub mod safety;
 
 pub use policy::PolicyAwareClassifier;
 pub use rules::RulesClassifier;
