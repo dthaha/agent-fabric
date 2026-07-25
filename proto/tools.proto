@@ -39,12 +39,12 @@ message ToolDescriptor {
 enum ToolLocality {
   TOOL_LOCALITY_UNSPECIFIED = 0;
   TOOL_LOCALITY_ENDPOINT_ONLY = 1;
-  TOOL_LOCALITY_HOSTED_OK = 2;
+  TOOL_LOCALITY_SERVER_OK = 2;
   TOOL_LOCALITY_EITHER = 3;
 }
 
 // CUA (computer-use actuator) capture request. The actuator stays on the
-// endpoint; a hosted brain reaches it via the authenticated tool bridge.
+// endpoint; a server-side brain reaches it via the authenticated tool bridge.
 message CuaCaptureRequest {
   string app = 1;
   CaptureMode mode = 2;

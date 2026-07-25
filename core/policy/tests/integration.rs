@@ -3,7 +3,7 @@
 
 use fabric_policy::{Decision, ModelLocus, PolicyStore};
 use fabric_types::policy::{
-    DlpAction, DlpPattern, EndpointPolicy, HostedPolicy, InferenceRule, ToolAction, ToolRule,
+    DlpAction, DlpPattern, EndpointPolicy, InferenceRule, ServerPolicy, ToolAction, ToolRule,
 };
 
 fn tool_rule(pattern: &str, action: ToolAction) -> ToolRule {
@@ -40,8 +40,8 @@ fn endpoint_policy(version: &str, kill_switch: bool, cua_allowed: bool) -> Endpo
     }
 }
 
-fn hosted_policy(version: &str) -> HostedPolicy {
-    HostedPolicy {
+fn server_policy(version: &str) -> ServerPolicy {
+    ServerPolicy {
         policy_id: "hp-1".into(),
         version: version.into(),
         org_id: "org-1".into(),
@@ -63,20 +63,20 @@ fn hosted_policy(version: &str) -> HostedPolicy {
 fn full_policy_lifecycle() {
     let mut store = PolicyStore::new();
     store.load_endpoint(endpoint_policy("v1", false, false));
-    store.load_hosted(hosted_policy("v1"));
+    store.load_server(server_policy("v1"));
 
     let gate = store.gate();
     assert_eq!(store.endpoint_version(), Some("v1"));
-    assert_eq!(store.hosted_version(), Some("v1"));
+    assert_eq!(store.server_version(), Some("v1"));
 
-    // Endpoint allow minus hosted restriction.
+    // Endpoint allow minus server restriction.
     assert!(gate.check_tool("shell.list").is_allowed());
     assert!(matches!(gate.check_tool("shell.exec"), Decision::Deny(_)));
 
     // Endpoint deny.
     assert!(matches!(gate.check_tool("cua.click"), Decision::Deny(_)));
 
-    // Hosted inference rules.
+    // Server-side inference rules.
     assert!(gate
         .check_inference("bedrock", "claude-sonnet", 4096)
         .is_allowed());
@@ -85,7 +85,7 @@ fn full_policy_lifecycle() {
         Decision::Deny(_)
     ));
     assert!(matches!(
-        gate.check_model("bedrock/claude-sonnet", ModelLocus::Hosted),
+        gate.check_model("bedrock/claude-sonnet", ModelLocus::Server),
         Decision::Allow
     ));
 
@@ -95,7 +95,7 @@ fn full_policy_lifecycle() {
     assert!(out.redacted_content.contains("[REDACTED:ssn]"));
     assert!(!out.redacted_content.contains("123-45-6789"));
 
-    // Session limits from hosted policy flow through the merge.
+    // Session limits from server policy flow through the merge.
     assert!(gate.check_session_limits(1.0, 2).is_allowed());
     assert!(matches!(
         gate.check_session_limits(25.0, 2),

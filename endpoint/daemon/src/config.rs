@@ -18,8 +18,8 @@ pub struct DaemonConfig {
     /// Path to the endpoint policy document (JSON). Missing file means the
     /// daemon starts fail-closed with an empty policy store.
     pub policy_path: PathBuf,
-    /// Hosted control-plane base URL. Empty means offline-only.
-    pub hosted_url: String,
+    /// Server-side control-plane base URL. Empty means offline-only.
+    pub server_url: String,
     /// Port for the localhost health/status HTTP server.
     pub health_port: u16,
     /// Port for the local tool bridge server.
@@ -34,7 +34,7 @@ impl Default for DaemonConfig {
             device_id: format!("device-{}", uuid::Uuid::now_v7()),
             context_db: PathBuf::from("fabric-context.db"),
             policy_path: PathBuf::from("fabric-policy.json"),
-            hosted_url: String::new(),
+            server_url: String::new(),
             health_port: 47770,
             tool_bridge_port: 47771,
             model_disk_budget_mib: 8192,
@@ -71,7 +71,7 @@ mod tests {
         let cfg = DaemonConfig::default();
         assert_eq!(cfg.health_port, 47770);
         assert_eq!(cfg.tool_bridge_port, 47771);
-        assert!(cfg.hosted_url.is_empty());
+        assert!(cfg.server_url.is_empty());
         assert!(!cfg.device_id.is_empty());
     }
 

@@ -103,7 +103,7 @@ impl EntryKind {
 pub enum Locus {
     Unspecified = 0,
     Endpoint = 1,
-    Hosted = 2,
+    Server = 2,
     Split = 3,
 }
 impl Locus {
@@ -115,7 +115,7 @@ impl Locus {
         match self {
             Locus::Unspecified => "LOCUS_UNSPECIFIED",
             Locus::Endpoint => "LOCUS_ENDPOINT",
-            Locus::Hosted => "LOCUS_HOSTED",
+            Locus::Server => "LOCUS_SERVER",
             Locus::Split => "LOCUS_SPLIT",
         }
     }
@@ -124,7 +124,7 @@ impl Locus {
         match value {
             "LOCUS_UNSPECIFIED" => Some(Self::Unspecified),
             "LOCUS_ENDPOINT" => Some(Self::Endpoint),
-            "LOCUS_HOSTED" => Some(Self::Hosted),
+            "LOCUS_SERVER" => Some(Self::Server),
             "LOCUS_SPLIT" => Some(Self::Split),
             _ => None,
         }

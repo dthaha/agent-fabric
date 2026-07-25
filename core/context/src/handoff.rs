@@ -141,18 +141,18 @@ mod tests {
         let req = HandoffRequest {
             session_id: "s1".into(),
             from_holder: "endpoint-1".into(),
-            to_holder: "hosted-1".into(),
+            to_holder: "server-1".into(),
             freeze_at_seq: 3,
             reason: "long-horizon task".into(),
         };
-        let new_lease = execute_handoff(&store, &req, Locus::Hosted, DEFAULT_LEASE_TTL_MS).unwrap();
+        let new_lease = execute_handoff(&store, &req, Locus::Server, DEFAULT_LEASE_TTL_MS).unwrap();
 
         // Old lease released, new lease active from the freeze point.
         assert_eq!(
             store.lease(&old.lease_id).unwrap().state,
             LeaseState::Released as i32
         );
-        assert_eq!(new_lease.holder_id, "hosted-1");
+        assert_eq!(new_lease.holder_id, "server-1");
         assert_eq!(new_lease.granted_seq, 3);
 
         // The handoff marker is the last entry from the old holder.
@@ -171,7 +171,7 @@ mod tests {
         // Ack from the new holder reactivates the session.
         let ack = HandoffAck {
             session_id: "s1".into(),
-            new_holder: "hosted-1".into(),
+            new_holder: "server-1".into(),
             caught_up_to_seq: 4,
             success: true,
             error: String::new(),
@@ -183,7 +183,7 @@ mod tests {
         );
 
         // New holder writes at seq 5 — continuity preserved, no restart.
-        let mut e5 = test_entry("e5", "s1", "hosted-1");
+        let mut e5 = test_entry("e5", "s1", "server-1");
         assert_eq!(store.append_entry(&mut e5).unwrap(), 5);
     }
 
@@ -193,12 +193,12 @@ mod tests {
         let req = HandoffRequest {
             session_id: "s1".into(),
             from_holder: "mallory".into(),
-            to_holder: "hosted-1".into(),
+            to_holder: "server-1".into(),
             freeze_at_seq: 0,
             reason: "hostile takeover".into(),
         };
         assert!(matches!(
-            execute_handoff(&store, &req, Locus::Hosted, DEFAULT_LEASE_TTL_MS),
+            execute_handoff(&store, &req, Locus::Server, DEFAULT_LEASE_TTL_MS),
             Err(StoreError::NotLeaseHolder { .. })
         ));
     }
@@ -212,15 +212,15 @@ mod tests {
         let req = HandoffRequest {
             session_id: "s1".into(),
             from_holder: "endpoint-1".into(),
-            to_holder: "hosted-1".into(),
+            to_holder: "server-1".into(),
             freeze_at_seq: 1,
             reason: String::new(),
         };
-        let new_lease = execute_handoff(&store, &req, Locus::Hosted, DEFAULT_LEASE_TTL_MS).unwrap();
+        let new_lease = execute_handoff(&store, &req, Locus::Server, DEFAULT_LEASE_TTL_MS).unwrap();
 
         let ack = HandoffAck {
             session_id: "s1".into(),
-            new_holder: "hosted-1".into(),
+            new_holder: "server-1".into(),
             caught_up_to_seq: 0,
             success: true,
             error: String::new(),

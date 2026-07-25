@@ -9,7 +9,7 @@
 //!    model's detected data classes are merged into the input beforehand —
 //!    additive only, never subtractive.
 //! 3. **Heuristic fallbacks** (long horizon → split, no local model →
-//!    hosted, high complexity → hosted): less accurate than a model, kept
+//!    server, high complexity → server): less accurate than a model, kept
 //!    for cold start (no model seeded yet) and as a safety net.
 
 use fabric_types::context::Locus;
@@ -99,7 +99,7 @@ impl LocusClassifier for RulesClassifier {
 
         // ═══ PHASE 1: HARD CONSTRAINTS ═══
         // These always fire. No model advisory can override them.
-        // Rules: kill switch, user prefs (background/hosted/local),
+        // Rules: kill switch, user prefs (background/server/local),
         // no network, endpoint-only tools, restricted data.
 
         // 1. Kill switch: the gate denies everything anyway; stay local.
@@ -109,17 +109,17 @@ impl LocusClassifier for RulesClassifier {
         // 2. Background execution requested.
         if input.user_preference == UserLocusPref::Background && input.network_available {
             return decision(
-                Locus::Hosted,
+                Locus::Server,
                 "user requested background execution",
                 0.95,
                 Some(Locus::Endpoint),
             );
         }
-        // 3. Explicit hosted preference.
-        if input.user_preference == UserLocusPref::PreferHosted && input.network_available {
+        // 3. Explicit server preference.
+        if input.user_preference == UserLocusPref::PreferServer && input.network_available {
             return decision(
-                Locus::Hosted,
-                "user prefers hosted",
+                Locus::Server,
+                "user prefers server",
                 0.9,
                 Some(Locus::Endpoint),
             );
@@ -181,12 +181,12 @@ impl LocusClassifier for RulesClassifier {
         // These are LESS ACCURATE than a model — they exist for the cold-start
         // case (no model seeded yet) and as a safety net if the model fails.
 
-        // 8. Heuristic fallback: long-horizon work favours a hosted brain
+        // 8. Heuristic fallback: long-horizon work favours a server-side brain
         //    with endpoint hands via the bridge.
         if input.estimated_horizon == Horizon::LongHorizon && input.network_available {
             return decision(
                 Locus::Split,
-                "long-horizon task — hosted inference, endpoint tools",
+                "long-horizon task — server-side inference, endpoint tools",
                 0.85,
                 Some(Locus::Endpoint),
             );
@@ -194,17 +194,17 @@ impl LocusClassifier for RulesClassifier {
         // 9. Heuristic fallback: nothing to think with locally.
         if !input.local_model_available && input.network_available {
             return decision(
-                Locus::Hosted,
+                Locus::Server,
                 "no local model available",
                 0.8,
                 Some(Locus::Endpoint),
             );
         }
-        // 10. Heuristic fallback: heavy reasoning favours hosted inference.
+        // 10. Heuristic fallback: heavy reasoning favours server-side inference.
         if input.estimated_complexity == Complexity::High && input.network_available {
             return decision(
-                Locus::Hosted,
-                "high complexity — hosted inference",
+                Locus::Server,
+                "high complexity — server-side inference",
                 0.7,
                 Some(Locus::Endpoint),
             );
@@ -219,7 +219,7 @@ impl LocusClassifier for RulesClassifier {
 fn locus_name(l: Locus) -> &'static str {
     match l {
         Locus::Endpoint => "endpoint",
-        Locus::Hosted => "hosted",
+        Locus::Server => "server",
         Locus::Split => "split",
         _ => "unspecified",
     }
@@ -261,7 +261,7 @@ mod tests {
     fn kill_switch_forces_endpoint() {
         let c = RulesClassifier::with_config(true, vec![], vec![]);
         let mut i = input();
-        i.user_preference = UserLocusPref::PreferHosted;
+        i.user_preference = UserLocusPref::PreferServer;
         let d = c.classify(&i);
         assert_eq!(d.locus, Locus::Endpoint);
         assert_eq!(d.confidence, 1.0);
@@ -269,23 +269,23 @@ mod tests {
     }
 
     #[test]
-    fn background_preference_goes_hosted() {
+    fn background_preference_goes_server() {
         let c = RulesClassifier::new();
         let mut i = input();
         i.user_preference = UserLocusPref::Background;
         let d = c.classify(&i);
-        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.locus, Locus::Server);
         assert_eq!(d.confidence, 0.95);
         assert_eq!(d.fallback, Some(Locus::Endpoint));
     }
 
     #[test]
-    fn prefer_hosted_goes_hosted() {
+    fn prefer_server_goes_server() {
         let c = RulesClassifier::new();
         let mut i = input();
-        i.user_preference = UserLocusPref::PreferHosted;
+        i.user_preference = UserLocusPref::PreferServer;
         let d = c.classify(&i);
-        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.locus, Locus::Server);
         assert_eq!(d.confidence, 0.9);
         assert_eq!(d.fallback, Some(Locus::Endpoint));
     }
@@ -302,11 +302,11 @@ mod tests {
     }
 
     #[test]
-    fn no_network_forces_endpoint_even_when_prefer_hosted() {
+    fn no_network_forces_endpoint_even_when_prefer_server() {
         let c = RulesClassifier::new();
         let mut i = input();
         i.network_available = false;
-        i.user_preference = UserLocusPref::PreferHosted;
+        i.user_preference = UserLocusPref::PreferServer;
         let d = c.classify(&i);
         assert_eq!(d.locus, Locus::Endpoint);
         assert_eq!(d.confidence, 1.0);
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(c.classify(&i).locus, Locus::Endpoint); // default input otherwise
         i.data_classes = vec!["internal".into()];
         i.estimated_complexity = Complexity::High;
-        assert_eq!(c.classify(&i).locus, Locus::Hosted);
+        assert_eq!(c.classify(&i).locus, Locus::Server);
     }
 
     #[test]
@@ -389,23 +389,23 @@ mod tests {
     }
 
     #[test]
-    fn no_local_model_goes_hosted() {
+    fn no_local_model_goes_server() {
         let c = RulesClassifier::new();
         let mut i = input();
         i.local_model_available = false;
         let d = c.classify(&i);
-        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.locus, Locus::Server);
         assert_eq!(d.confidence, 0.8);
         assert_eq!(d.fallback, Some(Locus::Endpoint));
     }
 
     #[test]
-    fn high_complexity_goes_hosted() {
+    fn high_complexity_goes_server() {
         let c = RulesClassifier::new();
         let mut i = input();
         i.estimated_complexity = Complexity::High;
         let d = c.classify(&i);
-        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.locus, Locus::Server);
         assert_eq!(d.confidence, 0.7);
         assert_eq!(d.fallback, Some(Locus::Endpoint));
     }
@@ -420,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn hosted_and_split_decisions_carry_endpoint_fallback() {
+    fn server_and_split_decisions_carry_endpoint_fallback() {
         let c = RulesClassifier::new();
         let mut i = input();
         i.user_preference = UserLocusPref::Background;
@@ -445,13 +445,13 @@ mod tests {
     }
 
     #[test]
-    fn model_advisory_hosted_with_network() {
+    fn model_advisory_server_with_network() {
         let c = RulesClassifier::new();
         let mut i = input();
-        i.model_advisory = advisory(Locus::Hosted, 0.9);
+        i.model_advisory = advisory(Locus::Server, 0.9);
         let d = c.classify(&i);
-        assert_eq!(d.locus, Locus::Hosted);
-        assert!(d.reason.contains("model advisory: hosted"));
+        assert_eq!(d.locus, Locus::Server);
+        assert!(d.reason.contains("model advisory: server"));
         assert_eq!(d.fallback, Some(Locus::Endpoint));
     }
 
@@ -480,7 +480,7 @@ mod tests {
     fn model_advisory_overridden_by_kill_switch() {
         let c = RulesClassifier::with_config(true, vec![], vec![]);
         let mut i = input();
-        i.model_advisory = advisory(Locus::Hosted, 0.99);
+        i.model_advisory = advisory(Locus::Server, 0.99);
         let d = c.classify(&i);
         assert_eq!(d.locus, Locus::Endpoint);
         assert_eq!(d.confidence, 1.0);
@@ -491,7 +491,7 @@ mod tests {
         let c = RulesClassifier::new();
         let mut i = input();
         i.network_available = false;
-        i.model_advisory = advisory(Locus::Hosted, 0.99);
+        i.model_advisory = advisory(Locus::Server, 0.99);
         let d = c.classify(&i);
         assert_eq!(d.locus, Locus::Endpoint);
         assert_eq!(d.confidence, 1.0);
@@ -502,7 +502,7 @@ mod tests {
         let c = RulesClassifier::new();
         let mut i = input();
         i.data_classes = vec!["secret".into()];
-        i.model_advisory = advisory(Locus::Hosted, 0.99);
+        i.model_advisory = advisory(Locus::Server, 0.99);
         let d = c.classify(&i);
         assert_eq!(d.locus, Locus::Endpoint);
         assert!(d.reason.contains("secret"));
@@ -513,7 +513,7 @@ mod tests {
         let c = RulesClassifier::new();
         let mut i = input();
         i.user_preference = UserLocusPref::PreferLocal;
-        i.model_advisory = advisory(Locus::Hosted, 0.99);
+        i.model_advisory = advisory(Locus::Server, 0.99);
         let d = c.classify(&i);
         assert_eq!(d.locus, Locus::Endpoint);
         assert_eq!(d.confidence, 0.95);
@@ -523,7 +523,7 @@ mod tests {
     fn model_detected_data_classes_merged() {
         let c = RulesClassifier::new();
         let mut i = input();
-        let mut adv = advisory(Locus::Hosted, 0.9).unwrap();
+        let mut adv = advisory(Locus::Server, 0.9).unwrap();
         adv.detected_data_classes = vec!["pii".into()];
         i.model_advisory = Some(adv);
         let d = c.classify(&i);
@@ -536,7 +536,7 @@ mod tests {
         let c = RulesClassifier::new();
         let mut i = input();
         i.data_classes = vec!["secret".into()];
-        i.model_advisory = advisory(Locus::Hosted, 0.9);
+        i.model_advisory = advisory(Locus::Server, 0.9);
         let d = c.classify(&i);
         assert_eq!(d.locus, Locus::Endpoint);
         assert!(d.reason.contains("secret"));
@@ -548,7 +548,7 @@ mod tests {
         let mut i = input();
         i.estimated_complexity = Complexity::High;
         let d = c.classify(&i);
-        assert_eq!(d.locus, Locus::Hosted);
+        assert_eq!(d.locus, Locus::Server);
         assert_eq!(d.confidence, 0.7);
     }
 
@@ -556,7 +556,7 @@ mod tests {
     fn advisory_confidence_propagated() {
         let c = RulesClassifier::new();
         let mut i = input();
-        i.model_advisory = advisory(Locus::Hosted, 0.85);
+        i.model_advisory = advisory(Locus::Server, 0.85);
         let d = c.classify(&i);
         assert_eq!(d.confidence, 0.85);
     }

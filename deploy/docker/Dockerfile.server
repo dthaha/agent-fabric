@@ -1,4 +1,4 @@
-# Hosted runtime image: control plane + agent loop server.
+# Server-side runtime image: control plane + agent loop server.
 # Multi-stage: build in a full Rust toolchain, ship a minimal runtime.
 
 FROM rust:1-bookworm AS build
@@ -9,10 +9,10 @@ COPY Cargo.toml Cargo.lock ./
 COPY core ./core
 COPY enterprise ./enterprise
 COPY endpoint ./endpoint
-COPY hosted ./hosted
+COPY server ./server
 COPY sdk ./sdk
 
-RUN cargo build --release -p fabric-hosted
+RUN cargo build --release -p fabric-server
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
@@ -21,7 +21,7 @@ RUN apt-get update \
     && useradd --system --uid 10001 fabric
 USER fabric
 
-COPY --from=build /src/target/release/fabric-hosted /usr/local/bin/fabric-hosted
+COPY --from=build /src/target/release/fabric-server /usr/local/bin/fabric-server
 
 EXPOSE 8080
-ENTRYPOINT ["fabric-hosted"]
+ENTRYPOINT ["fabric-server"]

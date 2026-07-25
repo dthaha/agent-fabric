@@ -32,9 +32,9 @@ pub struct Status {
     pub version: String,
     pub uptime_secs: u64,
     pub policy_endpoint_version: String,
-    pub policy_hosted_version: String,
+    pub policy_server_version: String,
     pub context_db_path: String,
-    pub hosted_url: String,
+    pub server_url: String,
     pub active_sessions: u64,
     pub tool_bridge_port: u16,
 }
@@ -50,7 +50,7 @@ pub struct SessionInfo {
 #[derive(Debug, Deserialize)]
 pub struct PolicyInfo {
     pub endpoint_version: String,
-    pub hosted_version: String,
+    pub server_version: String,
     pub tool_rule_count: usize,
     pub kill_switch: bool,
     pub cua_enabled: bool,
@@ -120,10 +120,10 @@ impl DaemonClient {
 }
 
 pub fn print_status(s: &Status) {
-    let hosted = if s.hosted_url.is_empty() {
+    let server = if s.server_url.is_empty() {
         "(offline-only)"
     } else {
-        &s.hosted_url
+        &s.server_url
     };
     println!("device:            {}", s.device_id);
     println!("version:           {}", s.version);
@@ -133,11 +133,11 @@ pub fn print_status(s: &Status) {
         none_if_empty(&s.policy_endpoint_version)
     );
     println!(
-        "policy (hosted):   {}",
-        none_if_empty(&s.policy_hosted_version)
+        "policy (server):   {}",
+        none_if_empty(&s.policy_server_version)
     );
     println!("context db:        {}", s.context_db_path);
-    println!("hosted:            {hosted}");
+    println!("server:            {server}");
     println!("active sessions:   {}", s.active_sessions);
     println!("tool bridge port:  {}", s.tool_bridge_port);
 }
@@ -161,7 +161,7 @@ pub fn print_sessions(sessions: &[SessionInfo]) {
 
 pub fn print_policy(p: &PolicyInfo) {
     println!("endpoint version: {}", none_if_empty(&p.endpoint_version));
-    println!("hosted version:   {}", none_if_empty(&p.hosted_version));
+    println!("server version:   {}", none_if_empty(&p.server_version));
     println!("tool rules:       {}", p.tool_rule_count);
     println!("kill switch:      {}", on_off(p.kill_switch));
     println!("cua enabled:      {}", on_off(p.cua_enabled));

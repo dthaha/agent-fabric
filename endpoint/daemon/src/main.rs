@@ -44,8 +44,8 @@ async fn main() -> Result<()> {
     #[cfg(feature = "enterprise")]
     info!("enterprise features compiled in (mdm, audit-siem, ha, private-registry)");
 
-    if cfg.hosted_url.is_empty() {
-        warn!("no hosted URL configured — running offline-only");
+    if cfg.server_url.is_empty() {
+        warn!("no server URL configured — running offline-only");
     }
 
     // Health/status server on localhost, with graceful shutdown: it stops

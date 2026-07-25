@@ -1,12 +1,12 @@
 [package]
-name = "fabric-hosted"
+name = "fabric-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "fabric-hosted"
+name = "fabric-server"
 path = "src/main.rs"
 
 [dependencies]

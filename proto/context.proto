@@ -34,7 +34,7 @@ enum EntryKind {
 enum Locus {
   LOCUS_UNSPECIFIED = 0;
   LOCUS_ENDPOINT = 1;
-  LOCUS_HOSTED = 2;
+  LOCUS_SERVER = 2;
   LOCUS_SPLIT = 3;
 }
 

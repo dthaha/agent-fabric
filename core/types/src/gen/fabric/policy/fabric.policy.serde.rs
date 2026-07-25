@@ -10,7 +10,7 @@ impl serde::Serialize for BackgroundQuota {
         if self.max_concurrent_background != 0 {
             len += 1;
         }
-        if self.max_daily_hosted_turns != 0 {
+        if self.max_daily_server_turns != 0 {
             len += 1;
         }
         if self.require_user_consent {
@@ -20,8 +20,8 @@ impl serde::Serialize for BackgroundQuota {
         if self.max_concurrent_background != 0 {
             struct_ser.serialize_field("maxConcurrentBackground", &self.max_concurrent_background)?;
         }
-        if self.max_daily_hosted_turns != 0 {
-            struct_ser.serialize_field("maxDailyHostedTurns", &self.max_daily_hosted_turns)?;
+        if self.max_daily_server_turns != 0 {
+            struct_ser.serialize_field("maxDailyServerTurns", &self.max_daily_server_turns)?;
         }
         if self.require_user_consent {
             struct_ser.serialize_field("requireUserConsent", &self.require_user_consent)?;
@@ -38,8 +38,8 @@ impl<'de> serde::Deserialize<'de> for BackgroundQuota {
         const FIELDS: &[&str] = &[
             "max_concurrent_background",
             "maxConcurrentBackground",
-            "max_daily_hosted_turns",
-            "maxDailyHostedTurns",
+            "max_daily_server_turns",
+            "maxDailyServerTurns",
             "require_user_consent",
             "requireUserConsent",
         ];
@@ -47,7 +47,7 @@ impl<'de> serde::Deserialize<'de> for BackgroundQuota {
         #[allow(clippy::enum_variant_names)]
         enum GeneratedField {
             MaxConcurrentBackground,
-            MaxDailyHostedTurns,
+            MaxDailyServerTurns,
             RequireUserConsent,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
@@ -71,7 +71,7 @@ impl<'de> serde::Deserialize<'de> for BackgroundQuota {
                     {
                         match value {
                             "maxConcurrentBackground" | "max_concurrent_background" => Ok(GeneratedField::MaxConcurrentBackground),
-                            "maxDailyHostedTurns" | "max_daily_hosted_turns" => Ok(GeneratedField::MaxDailyHostedTurns),
+                            "maxDailyServerTurns" | "max_daily_server_turns" => Ok(GeneratedField::MaxDailyServerTurns),
                             "requireUserConsent" | "require_user_consent" => Ok(GeneratedField::RequireUserConsent),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
@@ -93,7 +93,7 @@ impl<'de> serde::Deserialize<'de> for BackgroundQuota {
                     V: serde::de::MapAccess<'de>,
             {
                 let mut max_concurrent_background__ = None;
-                let mut max_daily_hosted_turns__ = None;
+                let mut max_daily_server_turns__ = None;
                 let mut require_user_consent__ = None;
                 while let Some(k) = map_.next_key()? {
                     match k {
@@ -105,11 +105,11 @@ impl<'de> serde::Deserialize<'de> for BackgroundQuota {
                                 Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
                             ;
                         }
-                        GeneratedField::MaxDailyHostedTurns => {
-                            if max_daily_hosted_turns__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("maxDailyHostedTurns"));
+                        GeneratedField::MaxDailyServerTurns => {
+                            if max_daily_server_turns__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("maxDailyServerTurns"));
                             }
-                            max_daily_hosted_turns__ = 
+                            max_daily_server_turns__ = 
                                 Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
                             ;
                         }
@@ -123,7 +123,7 @@ impl<'de> serde::Deserialize<'de> for BackgroundQuota {
                 }
                 Ok(BackgroundQuota {
                     max_concurrent_background: max_concurrent_background__.unwrap_or_default(),
-                    max_daily_hosted_turns: max_daily_hosted_turns__.unwrap_or_default(),
+                    max_daily_server_turns: max_daily_server_turns__.unwrap_or_default(),
                     require_user_consent: require_user_consent__.unwrap_or_default(),
                 })
             }
@@ -675,7 +675,7 @@ impl serde::Serialize for EffectivePolicy {
         if !self.endpoint_version.is_empty() {
             len += 1;
         }
-        if !self.hosted_version.is_empty() {
+        if !self.server_version.is_empty() {
             len += 1;
         }
         if !self.data_rules.is_empty() {
@@ -712,8 +712,8 @@ impl serde::Serialize for EffectivePolicy {
         if !self.endpoint_version.is_empty() {
             struct_ser.serialize_field("endpointVersion", &self.endpoint_version)?;
         }
-        if !self.hosted_version.is_empty() {
-            struct_ser.serialize_field("hostedVersion", &self.hosted_version)?;
+        if !self.server_version.is_empty() {
+            struct_ser.serialize_field("serverVersion", &self.server_version)?;
         }
         if !self.data_rules.is_empty() {
             struct_ser.serialize_field("dataRules", &self.data_rules)?;
@@ -757,8 +757,8 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
         const FIELDS: &[&str] = &[
             "endpoint_version",
             "endpointVersion",
-            "hosted_version",
-            "hostedVersion",
+            "server_version",
+            "serverVersion",
             "data_rules",
             "dataRules",
             "tool_rules",
@@ -783,7 +783,7 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
         #[allow(clippy::enum_variant_names)]
         enum GeneratedField {
             EndpointVersion,
-            HostedVersion,
+            ServerVersion,
             DataRules,
             ToolRules,
             ModelRules,
@@ -816,7 +816,7 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
                     {
                         match value {
                             "endpointVersion" | "endpoint_version" => Ok(GeneratedField::EndpointVersion),
-                            "hostedVersion" | "hosted_version" => Ok(GeneratedField::HostedVersion),
+                            "serverVersion" | "server_version" => Ok(GeneratedField::ServerVersion),
                             "dataRules" | "data_rules" => Ok(GeneratedField::DataRules),
                             "toolRules" | "tool_rules" => Ok(GeneratedField::ToolRules),
                             "modelRules" | "model_rules" => Ok(GeneratedField::ModelRules),
@@ -847,7 +847,7 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
                     V: serde::de::MapAccess<'de>,
             {
                 let mut endpoint_version__ = None;
-                let mut hosted_version__ = None;
+                let mut server_version__ = None;
                 let mut data_rules__ = None;
                 let mut tool_rules__ = None;
                 let mut model_rules__ = None;
@@ -866,11 +866,11 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
                             }
                             endpoint_version__ = Some(map_.next_value()?);
                         }
-                        GeneratedField::HostedVersion => {
-                            if hosted_version__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("hostedVersion"));
+                        GeneratedField::ServerVersion => {
+                            if server_version__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("serverVersion"));
                             }
-                            hosted_version__ = Some(map_.next_value()?);
+                            server_version__ = Some(map_.next_value()?);
                         }
                         GeneratedField::DataRules => {
                             if data_rules__.is_some() {
@@ -942,7 +942,7 @@ impl<'de> serde::Deserialize<'de> for EffectivePolicy {
                 }
                 Ok(EffectivePolicy {
                     endpoint_version: endpoint_version__.unwrap_or_default(),
-                    hosted_version: hosted_version__.unwrap_or_default(),
+                    server_version: server_version__.unwrap_or_default(),
                     data_rules: data_rules__.unwrap_or_default(),
                     tool_rules: tool_rules__.unwrap_or_default(),
                     model_rules: model_rules__.unwrap_or_default(),
@@ -1230,225 +1230,78 @@ impl<'de> serde::Deserialize<'de> for EndpointPolicy {
         deserializer.deserialize_struct("fabric.policy.EndpointPolicy", FIELDS, GeneratedVisitor)
     }
 }
-impl serde::Serialize for HostedPolicy {
+impl serde::Serialize for FailMode {
     #[allow(deprecated)]
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        use serde::ser::SerializeStruct;
-        let mut len = 0;
-        if !self.policy_id.is_empty() {
-            len += 1;
-        }
-        if !self.version.is_empty() {
-            len += 1;
-        }
-        if !self.org_id.is_empty() {
-            len += 1;
-        }
-        if !self.inference_rules.is_empty() {
-            len += 1;
-        }
-        if self.background_quota.is_some() {
-            len += 1;
-        }
-        if !self.tool_restrictions.is_empty() {
-            len += 1;
-        }
-        if self.max_session_duration_hours != 0 {
-            len += 1;
-        }
-        if self.max_concurrent_sessions != 0 {
-            len += 1;
-        }
-        let mut struct_ser = serializer.serialize_struct("fabric.policy.HostedPolicy", len)?;
-        if !self.policy_id.is_empty() {
-            struct_ser.serialize_field("policyId", &self.policy_id)?;
-        }
-        if !self.version.is_empty() {
-            struct_ser.serialize_field("version", &self.version)?;
-        }
-        if !self.org_id.is_empty() {
-            struct_ser.serialize_field("orgId", &self.org_id)?;
-        }
-        if !self.inference_rules.is_empty() {
-            struct_ser.serialize_field("inferenceRules", &self.inference_rules)?;
-        }
-        if let Some(v) = self.background_quota.as_ref() {
-            struct_ser.serialize_field("backgroundQuota", v)?;
-        }
-        if !self.tool_restrictions.is_empty() {
-            struct_ser.serialize_field("toolRestrictions", &self.tool_restrictions)?;
-        }
-        if self.max_session_duration_hours != 0 {
-            struct_ser.serialize_field("maxSessionDurationHours", &self.max_session_duration_hours)?;
-        }
-        if self.max_concurrent_sessions != 0 {
-            struct_ser.serialize_field("maxConcurrentSessions", &self.max_concurrent_sessions)?;
-        }
-        struct_ser.end()
+        let variant = match self {
+            Self::Unspecified => "FAIL_MODE_UNSPECIFIED",
+            Self::Closed => "FAIL_MODE_CLOSED",
+            Self::Open => "FAIL_MODE_OPEN",
+        };
+        serializer.serialize_str(variant)
     }
 }
-impl<'de> serde::Deserialize<'de> for HostedPolicy {
+impl<'de> serde::Deserialize<'de> for FailMode {
     #[allow(deprecated)]
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         const FIELDS: &[&str] = &[
-            "policy_id",
-            "policyId",
-            "version",
-            "org_id",
-            "orgId",
-            "inference_rules",
-            "inferenceRules",
-            "background_quota",
-            "backgroundQuota",
-            "tool_restrictions",
-            "toolRestrictions",
-            "max_session_duration_hours",
-            "maxSessionDurationHours",
-            "max_concurrent_sessions",
-            "maxConcurrentSessions",
+            "FAIL_MODE_UNSPECIFIED",
+            "FAIL_MODE_CLOSED",
+            "FAIL_MODE_OPEN",
         ];
 
-        #[allow(clippy::enum_variant_names)]
-        enum GeneratedField {
-            PolicyId,
-            Version,
-            OrgId,
-            InferenceRules,
-            BackgroundQuota,
-            ToolRestrictions,
-            MaxSessionDurationHours,
-            MaxConcurrentSessions,
-        }
-        impl<'de> serde::Deserialize<'de> for GeneratedField {
-            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                struct GeneratedVisitor;
-
-                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-                    type Value = GeneratedField;
-
-                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        write!(formatter, "expected one of: {:?}", &FIELDS)
-                    }
-
-                    #[allow(unused_variables)]
-                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
-                    where
-                        E: serde::de::Error,
-                    {
-                        match value {
-                            "policyId" | "policy_id" => Ok(GeneratedField::PolicyId),
-                            "version" => Ok(GeneratedField::Version),
-                            "orgId" | "org_id" => Ok(GeneratedField::OrgId),
-                            "inferenceRules" | "inference_rules" => Ok(GeneratedField::InferenceRules),
-                            "backgroundQuota" | "background_quota" => Ok(GeneratedField::BackgroundQuota),
-                            "toolRestrictions" | "tool_restrictions" => Ok(GeneratedField::ToolRestrictions),
-                            "maxSessionDurationHours" | "max_session_duration_hours" => Ok(GeneratedField::MaxSessionDurationHours),
-                            "maxConcurrentSessions" | "max_concurrent_sessions" => Ok(GeneratedField::MaxConcurrentSessions),
-                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
-                        }
-                    }
-                }
-                deserializer.deserialize_identifier(GeneratedVisitor)
-            }
-        }
         struct GeneratedVisitor;
+
         impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-            type Value = HostedPolicy;
+            type Value = FailMode;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("struct fabric.policy.HostedPolicy")
+                write!(formatter, "expected one of: {:?}", &FIELDS)
             }
 
-            fn visit_map<V>(self, mut map_: V) -> std::result::Result<HostedPolicy, V::Error>
-                where
-                    V: serde::de::MapAccess<'de>,
+            fn visit_i64<E>(self, v: i64) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
             {
-                let mut policy_id__ = None;
-                let mut version__ = None;
-                let mut org_id__ = None;
-                let mut inference_rules__ = None;
-                let mut background_quota__ = None;
-                let mut tool_restrictions__ = None;
-                let mut max_session_duration_hours__ = None;
-                let mut max_concurrent_sessions__ = None;
-                while let Some(k) = map_.next_key()? {
-                    match k {
-                        GeneratedField::PolicyId => {
-                            if policy_id__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("policyId"));
-                            }
-                            policy_id__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::Version => {
-                            if version__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("version"));
-                            }
-                            version__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::OrgId => {
-                            if org_id__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("orgId"));
-                            }
-                            org_id__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::InferenceRules => {
-                            if inference_rules__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("inferenceRules"));
-                            }
-                            inference_rules__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::BackgroundQuota => {
-                            if background_quota__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("backgroundQuota"));
-                            }
-                            background_quota__ = map_.next_value()?;
-                        }
-                        GeneratedField::ToolRestrictions => {
-                            if tool_restrictions__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("toolRestrictions"));
-                            }
-                            tool_restrictions__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::MaxSessionDurationHours => {
-                            if max_session_duration_hours__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("maxSessionDurationHours"));
-                            }
-                            max_session_duration_hours__ = 
-                                Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
-                            ;
-                        }
-                        GeneratedField::MaxConcurrentSessions => {
-                            if max_concurrent_sessions__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("maxConcurrentSessions"));
-                            }
-                            max_concurrent_sessions__ = 
-                                Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
-                            ;
-                        }
-                    }
+                i32::try_from(v)
+                    .ok()
+                    .and_then(|x| x.try_into().ok())
+                    .ok_or_else(|| {
+                        serde::de::Error::invalid_value(serde::de::Unexpected::Signed(v), &self)
+                    })
+            }
+
+            fn visit_u64<E>(self, v: u64) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                i32::try_from(v)
+                    .ok()
+                    .and_then(|x| x.try_into().ok())
+                    .ok_or_else(|| {
+                        serde::de::Error::invalid_value(serde::de::Unexpected::Unsigned(v), &self)
+                    })
+            }
+
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "FAIL_MODE_UNSPECIFIED" => Ok(FailMode::Unspecified),
+                    "FAIL_MODE_CLOSED" => Ok(FailMode::Closed),
+                    "FAIL_MODE_OPEN" => Ok(FailMode::Open),
+                    _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
                 }
-                Ok(HostedPolicy {
-                    policy_id: policy_id__.unwrap_or_default(),
-                    version: version__.unwrap_or_default(),
-                    org_id: org_id__.unwrap_or_default(),
-                    inference_rules: inference_rules__.unwrap_or_default(),
-                    background_quota: background_quota__,
-                    tool_restrictions: tool_restrictions__.unwrap_or_default(),
-                    max_session_duration_hours: max_session_duration_hours__.unwrap_or_default(),
-                    max_concurrent_sessions: max_concurrent_sessions__.unwrap_or_default(),
-                })
             }
         }
-        deserializer.deserialize_struct("fabric.policy.HostedPolicy", FIELDS, GeneratedVisitor)
+        deserializer.deserialize_any(GeneratedVisitor)
     }
 }
 impl serde::Serialize for InferenceRule {
@@ -1634,7 +1487,7 @@ impl serde::Serialize for ModelRule {
         if self.allowed_local {
             len += 1;
         }
-        if self.allowed_hosted {
+        if self.allowed_server {
             len += 1;
         }
         if self.max_context_tokens != 0 {
@@ -1647,8 +1500,8 @@ impl serde::Serialize for ModelRule {
         if self.allowed_local {
             struct_ser.serialize_field("allowedLocal", &self.allowed_local)?;
         }
-        if self.allowed_hosted {
-            struct_ser.serialize_field("allowedHosted", &self.allowed_hosted)?;
+        if self.allowed_server {
+            struct_ser.serialize_field("allowedServer", &self.allowed_server)?;
         }
         if self.max_context_tokens != 0 {
             struct_ser.serialize_field("maxContextTokens", &self.max_context_tokens)?;
@@ -1667,8 +1520,8 @@ impl<'de> serde::Deserialize<'de> for ModelRule {
             "modelPattern",
             "allowed_local",
             "allowedLocal",
-            "allowed_hosted",
-            "allowedHosted",
+            "allowed_server",
+            "allowedServer",
             "max_context_tokens",
             "maxContextTokens",
         ];
@@ -1677,7 +1530,7 @@ impl<'de> serde::Deserialize<'de> for ModelRule {
         enum GeneratedField {
             ModelPattern,
             AllowedLocal,
-            AllowedHosted,
+            AllowedServer,
             MaxContextTokens,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
@@ -1702,7 +1555,7 @@ impl<'de> serde::Deserialize<'de> for ModelRule {
                         match value {
                             "modelPattern" | "model_pattern" => Ok(GeneratedField::ModelPattern),
                             "allowedLocal" | "allowed_local" => Ok(GeneratedField::AllowedLocal),
-                            "allowedHosted" | "allowed_hosted" => Ok(GeneratedField::AllowedHosted),
+                            "allowedServer" | "allowed_server" => Ok(GeneratedField::AllowedServer),
                             "maxContextTokens" | "max_context_tokens" => Ok(GeneratedField::MaxContextTokens),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
@@ -1725,7 +1578,7 @@ impl<'de> serde::Deserialize<'de> for ModelRule {
             {
                 let mut model_pattern__ = None;
                 let mut allowed_local__ = None;
-                let mut allowed_hosted__ = None;
+                let mut allowed_server__ = None;
                 let mut max_context_tokens__ = None;
                 while let Some(k) = map_.next_key()? {
                     match k {
@@ -1741,11 +1594,11 @@ impl<'de> serde::Deserialize<'de> for ModelRule {
                             }
                             allowed_local__ = Some(map_.next_value()?);
                         }
-                        GeneratedField::AllowedHosted => {
-                            if allowed_hosted__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("allowedHosted"));
+                        GeneratedField::AllowedServer => {
+                            if allowed_server__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("allowedServer"));
                             }
-                            allowed_hosted__ = Some(map_.next_value()?);
+                            allowed_server__ = Some(map_.next_value()?);
                         }
                         GeneratedField::MaxContextTokens => {
                             if max_context_tokens__.is_some() {
@@ -1760,12 +1613,626 @@ impl<'de> serde::Deserialize<'de> for ModelRule {
                 Ok(ModelRule {
                     model_pattern: model_pattern__.unwrap_or_default(),
                     allowed_local: allowed_local__.unwrap_or_default(),
-                    allowed_hosted: allowed_hosted__.unwrap_or_default(),
+                    allowed_server: allowed_server__.unwrap_or_default(),
                     max_context_tokens: max_context_tokens__.unwrap_or_default(),
                 })
             }
         }
         deserializer.deserialize_struct("fabric.policy.ModelRule", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for SafetyAction {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let variant = match self {
+            Self::Unspecified => "SAFETY_ACTION_UNSPECIFIED",
+            Self::Allow => "SAFETY_ACTION_ALLOW",
+            Self::Warn => "SAFETY_ACTION_WARN",
+            Self::ForceEndpoint => "SAFETY_ACTION_FORCE_ENDPOINT",
+            Self::Block => "SAFETY_ACTION_BLOCK",
+        };
+        serializer.serialize_str(variant)
+    }
+}
+impl<'de> serde::Deserialize<'de> for SafetyAction {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "SAFETY_ACTION_UNSPECIFIED",
+            "SAFETY_ACTION_ALLOW",
+            "SAFETY_ACTION_WARN",
+            "SAFETY_ACTION_FORCE_ENDPOINT",
+            "SAFETY_ACTION_BLOCK",
+        ];
+
+        struct GeneratedVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = SafetyAction;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(formatter, "expected one of: {:?}", &FIELDS)
+            }
+
+            fn visit_i64<E>(self, v: i64) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                i32::try_from(v)
+                    .ok()
+                    .and_then(|x| x.try_into().ok())
+                    .ok_or_else(|| {
+                        serde::de::Error::invalid_value(serde::de::Unexpected::Signed(v), &self)
+                    })
+            }
+
+            fn visit_u64<E>(self, v: u64) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                i32::try_from(v)
+                    .ok()
+                    .and_then(|x| x.try_into().ok())
+                    .ok_or_else(|| {
+                        serde::de::Error::invalid_value(serde::de::Unexpected::Unsigned(v), &self)
+                    })
+            }
+
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "SAFETY_ACTION_UNSPECIFIED" => Ok(SafetyAction::Unspecified),
+                    "SAFETY_ACTION_ALLOW" => Ok(SafetyAction::Allow),
+                    "SAFETY_ACTION_WARN" => Ok(SafetyAction::Warn),
+                    "SAFETY_ACTION_FORCE_ENDPOINT" => Ok(SafetyAction::ForceEndpoint),
+                    "SAFETY_ACTION_BLOCK" => Ok(SafetyAction::Block),
+                    _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
+                }
+            }
+        }
+        deserializer.deserialize_any(GeneratedVisitor)
+    }
+}
+impl serde::Serialize for SafetyConfig {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.endpoint_url.is_empty() {
+            len += 1;
+        }
+        if !self.model.is_empty() {
+            len += 1;
+        }
+        if !self.parser.is_empty() {
+            len += 1;
+        }
+        if self.timeout_ms != 0 {
+            len += 1;
+        }
+        if self.fail_mode != 0 {
+            len += 1;
+        }
+        if !self.rules.is_empty() {
+            len += 1;
+        }
+        if self.default_action != 0 {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.policy.SafetyConfig", len)?;
+        if !self.endpoint_url.is_empty() {
+            struct_ser.serialize_field("endpointUrl", &self.endpoint_url)?;
+        }
+        if !self.model.is_empty() {
+            struct_ser.serialize_field("model", &self.model)?;
+        }
+        if !self.parser.is_empty() {
+            struct_ser.serialize_field("parser", &self.parser)?;
+        }
+        if self.timeout_ms != 0 {
+            struct_ser.serialize_field("timeoutMs", &self.timeout_ms)?;
+        }
+        if self.fail_mode != 0 {
+            let v = FailMode::try_from(self.fail_mode)
+                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.fail_mode)))?;
+            struct_ser.serialize_field("failMode", &v)?;
+        }
+        if !self.rules.is_empty() {
+            struct_ser.serialize_field("rules", &self.rules)?;
+        }
+        if self.default_action != 0 {
+            let v = SafetyAction::try_from(self.default_action)
+                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.default_action)))?;
+            struct_ser.serialize_field("defaultAction", &v)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for SafetyConfig {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "endpoint_url",
+            "endpointUrl",
+            "model",
+            "parser",
+            "timeout_ms",
+            "timeoutMs",
+            "fail_mode",
+            "failMode",
+            "rules",
+            "default_action",
+            "defaultAction",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            EndpointUrl,
+            Model,
+            Parser,
+            TimeoutMs,
+            FailMode,
+            Rules,
+            DefaultAction,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "endpointUrl" | "endpoint_url" => Ok(GeneratedField::EndpointUrl),
+                            "model" => Ok(GeneratedField::Model),
+                            "parser" => Ok(GeneratedField::Parser),
+                            "timeoutMs" | "timeout_ms" => Ok(GeneratedField::TimeoutMs),
+                            "failMode" | "fail_mode" => Ok(GeneratedField::FailMode),
+                            "rules" => Ok(GeneratedField::Rules),
+                            "defaultAction" | "default_action" => Ok(GeneratedField::DefaultAction),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = SafetyConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.policy.SafetyConfig")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<SafetyConfig, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut endpoint_url__ = None;
+                let mut model__ = None;
+                let mut parser__ = None;
+                let mut timeout_ms__ = None;
+                let mut fail_mode__ = None;
+                let mut rules__ = None;
+                let mut default_action__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::EndpointUrl => {
+                            if endpoint_url__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("endpointUrl"));
+                            }
+                            endpoint_url__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Model => {
+                            if model__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("model"));
+                            }
+                            model__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Parser => {
+                            if parser__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("parser"));
+                            }
+                            parser__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::TimeoutMs => {
+                            if timeout_ms__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("timeoutMs"));
+                            }
+                            timeout_ms__ = 
+                                Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
+                            ;
+                        }
+                        GeneratedField::FailMode => {
+                            if fail_mode__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("failMode"));
+                            }
+                            fail_mode__ = Some(map_.next_value::<FailMode>()? as i32);
+                        }
+                        GeneratedField::Rules => {
+                            if rules__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("rules"));
+                            }
+                            rules__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::DefaultAction => {
+                            if default_action__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("defaultAction"));
+                            }
+                            default_action__ = Some(map_.next_value::<SafetyAction>()? as i32);
+                        }
+                    }
+                }
+                Ok(SafetyConfig {
+                    endpoint_url: endpoint_url__.unwrap_or_default(),
+                    model: model__.unwrap_or_default(),
+                    parser: parser__.unwrap_or_default(),
+                    timeout_ms: timeout_ms__.unwrap_or_default(),
+                    fail_mode: fail_mode__.unwrap_or_default(),
+                    rules: rules__.unwrap_or_default(),
+                    default_action: default_action__.unwrap_or_default(),
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.policy.SafetyConfig", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for SafetyPolicyRule {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.category.is_empty() {
+            len += 1;
+        }
+        if self.action != 0 {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.policy.SafetyPolicyRule", len)?;
+        if !self.category.is_empty() {
+            struct_ser.serialize_field("category", &self.category)?;
+        }
+        if self.action != 0 {
+            let v = SafetyAction::try_from(self.action)
+                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.action)))?;
+            struct_ser.serialize_field("action", &v)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for SafetyPolicyRule {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "category",
+            "action",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            Category,
+            Action,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "category" => Ok(GeneratedField::Category),
+                            "action" => Ok(GeneratedField::Action),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = SafetyPolicyRule;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.policy.SafetyPolicyRule")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<SafetyPolicyRule, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut category__ = None;
+                let mut action__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::Category => {
+                            if category__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("category"));
+                            }
+                            category__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Action => {
+                            if action__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("action"));
+                            }
+                            action__ = Some(map_.next_value::<SafetyAction>()? as i32);
+                        }
+                    }
+                }
+                Ok(SafetyPolicyRule {
+                    category: category__.unwrap_or_default(),
+                    action: action__.unwrap_or_default(),
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.policy.SafetyPolicyRule", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for ServerPolicy {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.policy_id.is_empty() {
+            len += 1;
+        }
+        if !self.version.is_empty() {
+            len += 1;
+        }
+        if !self.org_id.is_empty() {
+            len += 1;
+        }
+        if !self.inference_rules.is_empty() {
+            len += 1;
+        }
+        if self.background_quota.is_some() {
+            len += 1;
+        }
+        if !self.tool_restrictions.is_empty() {
+            len += 1;
+        }
+        if self.max_session_duration_hours != 0 {
+            len += 1;
+        }
+        if self.max_concurrent_sessions != 0 {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.policy.ServerPolicy", len)?;
+        if !self.policy_id.is_empty() {
+            struct_ser.serialize_field("policyId", &self.policy_id)?;
+        }
+        if !self.version.is_empty() {
+            struct_ser.serialize_field("version", &self.version)?;
+        }
+        if !self.org_id.is_empty() {
+            struct_ser.serialize_field("orgId", &self.org_id)?;
+        }
+        if !self.inference_rules.is_empty() {
+            struct_ser.serialize_field("inferenceRules", &self.inference_rules)?;
+        }
+        if let Some(v) = self.background_quota.as_ref() {
+            struct_ser.serialize_field("backgroundQuota", v)?;
+        }
+        if !self.tool_restrictions.is_empty() {
+            struct_ser.serialize_field("toolRestrictions", &self.tool_restrictions)?;
+        }
+        if self.max_session_duration_hours != 0 {
+            struct_ser.serialize_field("maxSessionDurationHours", &self.max_session_duration_hours)?;
+        }
+        if self.max_concurrent_sessions != 0 {
+            struct_ser.serialize_field("maxConcurrentSessions", &self.max_concurrent_sessions)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ServerPolicy {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "policy_id",
+            "policyId",
+            "version",
+            "org_id",
+            "orgId",
+            "inference_rules",
+            "inferenceRules",
+            "background_quota",
+            "backgroundQuota",
+            "tool_restrictions",
+            "toolRestrictions",
+            "max_session_duration_hours",
+            "maxSessionDurationHours",
+            "max_concurrent_sessions",
+            "maxConcurrentSessions",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            PolicyId,
+            Version,
+            OrgId,
+            InferenceRules,
+            BackgroundQuota,
+            ToolRestrictions,
+            MaxSessionDurationHours,
+            MaxConcurrentSessions,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "policyId" | "policy_id" => Ok(GeneratedField::PolicyId),
+                            "version" => Ok(GeneratedField::Version),
+                            "orgId" | "org_id" => Ok(GeneratedField::OrgId),
+                            "inferenceRules" | "inference_rules" => Ok(GeneratedField::InferenceRules),
+                            "backgroundQuota" | "background_quota" => Ok(GeneratedField::BackgroundQuota),
+                            "toolRestrictions" | "tool_restrictions" => Ok(GeneratedField::ToolRestrictions),
+                            "maxSessionDurationHours" | "max_session_duration_hours" => Ok(GeneratedField::MaxSessionDurationHours),
+                            "maxConcurrentSessions" | "max_concurrent_sessions" => Ok(GeneratedField::MaxConcurrentSessions),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = ServerPolicy;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.policy.ServerPolicy")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<ServerPolicy, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut policy_id__ = None;
+                let mut version__ = None;
+                let mut org_id__ = None;
+                let mut inference_rules__ = None;
+                let mut background_quota__ = None;
+                let mut tool_restrictions__ = None;
+                let mut max_session_duration_hours__ = None;
+                let mut max_concurrent_sessions__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::PolicyId => {
+                            if policy_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("policyId"));
+                            }
+                            policy_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Version => {
+                            if version__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("version"));
+                            }
+                            version__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::OrgId => {
+                            if org_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("orgId"));
+                            }
+                            org_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::InferenceRules => {
+                            if inference_rules__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("inferenceRules"));
+                            }
+                            inference_rules__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::BackgroundQuota => {
+                            if background_quota__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("backgroundQuota"));
+                            }
+                            background_quota__ = map_.next_value()?;
+                        }
+                        GeneratedField::ToolRestrictions => {
+                            if tool_restrictions__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("toolRestrictions"));
+                            }
+                            tool_restrictions__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::MaxSessionDurationHours => {
+                            if max_session_duration_hours__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("maxSessionDurationHours"));
+                            }
+                            max_session_duration_hours__ = 
+                                Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
+                            ;
+                        }
+                        GeneratedField::MaxConcurrentSessions => {
+                            if max_concurrent_sessions__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("maxConcurrentSessions"));
+                            }
+                            max_concurrent_sessions__ = 
+                                Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
+                            ;
+                        }
+                    }
+                }
+                Ok(ServerPolicy {
+                    policy_id: policy_id__.unwrap_or_default(),
+                    version: version__.unwrap_or_default(),
+                    org_id: org_id__.unwrap_or_default(),
+                    inference_rules: inference_rules__.unwrap_or_default(),
+                    background_quota: background_quota__,
+                    tool_restrictions: tool_restrictions__.unwrap_or_default(),
+                    max_session_duration_hours: max_session_duration_hours__.unwrap_or_default(),
+                    max_concurrent_sessions: max_concurrent_sessions__.unwrap_or_default(),
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.policy.ServerPolicy", FIELDS, GeneratedVisitor)
     }
 }
 impl serde::Serialize for ToolAction {
@@ -1971,448 +2438,5 @@ impl<'de> serde::Deserialize<'de> for ToolRule {
             }
         }
         deserializer.deserialize_struct("fabric.policy.ToolRule", FIELDS, GeneratedVisitor)
-    }
-}
-impl serde::Serialize for SafetyAction {
-    #[allow(deprecated)]
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let variant = match self {
-            Self::Unspecified => "SAFETY_ACTION_UNSPECIFIED",
-            Self::Allow => "SAFETY_ACTION_ALLOW",
-            Self::Warn => "SAFETY_ACTION_WARN",
-            Self::ForceEndpoint => "SAFETY_ACTION_FORCE_ENDPOINT",
-            Self::Block => "SAFETY_ACTION_BLOCK",
-        };
-        serializer.serialize_str(variant)
-    }
-}
-impl<'de> serde::Deserialize<'de> for SafetyAction {
-    #[allow(deprecated)]
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        const FIELDS: &[&str] = &[
-            "SAFETY_ACTION_UNSPECIFIED",
-            "SAFETY_ACTION_ALLOW",
-            "SAFETY_ACTION_WARN",
-            "SAFETY_ACTION_FORCE_ENDPOINT",
-            "SAFETY_ACTION_BLOCK",
-        ];
-        struct GeneratedVisitor;
-        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-            type Value = SafetyAction;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(formatter, "expected one of: {:?}", &FIELDS)
-            }
-            fn visit_i64<E>(self, v: i64) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                i32::try_from(v)
-                    .ok()
-                    .and_then(|x| x.try_into().ok())
-                    .ok_or_else(|| {
-                        serde::de::Error::invalid_value(serde::de::Unexpected::Signed(v), &self)
-                    })
-            }
-            fn visit_u64<E>(self, v: u64) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                i32::try_from(v)
-                    .ok()
-                    .and_then(|x| x.try_into().ok())
-                    .ok_or_else(|| {
-                        serde::de::Error::invalid_value(serde::de::Unexpected::Unsigned(v), &self)
-                    })
-            }
-            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match value {
-                    "SAFETY_ACTION_UNSPECIFIED" => Ok(SafetyAction::Unspecified),
-                    "SAFETY_ACTION_ALLOW" => Ok(SafetyAction::Allow),
-                    "SAFETY_ACTION_WARN" => Ok(SafetyAction::Warn),
-                    "SAFETY_ACTION_FORCE_ENDPOINT" => Ok(SafetyAction::ForceEndpoint),
-                    "SAFETY_ACTION_BLOCK" => Ok(SafetyAction::Block),
-                    _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
-                }
-            }
-        }
-        deserializer.deserialize_any(GeneratedVisitor)
-    }
-}
-impl serde::Serialize for FailMode {
-    #[allow(deprecated)]
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let variant = match self {
-            Self::Unspecified => "FAIL_MODE_UNSPECIFIED",
-            Self::Closed => "FAIL_MODE_CLOSED",
-            Self::Open => "FAIL_MODE_OPEN",
-        };
-        serializer.serialize_str(variant)
-    }
-}
-impl<'de> serde::Deserialize<'de> for FailMode {
-    #[allow(deprecated)]
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        const FIELDS: &[&str] = &[
-            "FAIL_MODE_UNSPECIFIED",
-            "FAIL_MODE_CLOSED",
-            "FAIL_MODE_OPEN",
-        ];
-        struct GeneratedVisitor;
-        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-            type Value = FailMode;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(formatter, "expected one of: {:?}", &FIELDS)
-            }
-            fn visit_i64<E>(self, v: i64) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                i32::try_from(v)
-                    .ok()
-                    .and_then(|x| x.try_into().ok())
-                    .ok_or_else(|| {
-                        serde::de::Error::invalid_value(serde::de::Unexpected::Signed(v), &self)
-                    })
-            }
-            fn visit_u64<E>(self, v: u64) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                i32::try_from(v)
-                    .ok()
-                    .and_then(|x| x.try_into().ok())
-                    .ok_or_else(|| {
-                        serde::de::Error::invalid_value(serde::de::Unexpected::Unsigned(v), &self)
-                    })
-            }
-            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match value {
-                    "FAIL_MODE_UNSPECIFIED" => Ok(FailMode::Unspecified),
-                    "FAIL_MODE_CLOSED" => Ok(FailMode::Closed),
-                    "FAIL_MODE_OPEN" => Ok(FailMode::Open),
-                    _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
-                }
-            }
-        }
-        deserializer.deserialize_any(GeneratedVisitor)
-    }
-}
-impl serde::Serialize for SafetyPolicyRule {
-    #[allow(deprecated)]
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut len = 0;
-        if !self.category.is_empty() {
-            len += 1;
-        }
-        if self.action != 0 {
-            len += 1;
-        }
-        let mut struct_ser = serializer.serialize_struct("fabric.policy.SafetyPolicyRule", len)?;
-        if !self.category.is_empty() {
-            struct_ser.serialize_field("category", &self.category)?;
-        }
-        if self.action != 0 {
-            let v = SafetyAction::try_from(self.action)
-                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.action)))?;
-            struct_ser.serialize_field("action", &v)?;
-        }
-        struct_ser.end()
-    }
-}
-impl<'de> serde::Deserialize<'de> for SafetyPolicyRule {
-    #[allow(deprecated)]
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        const FIELDS: &[&str] = &[
-            "category",
-            "action",
-        ];
-        #[allow(clippy::enum_variant_names)]
-        enum GeneratedField {
-            Category,
-            Action,
-        }
-        impl<'de> serde::Deserialize<'de> for GeneratedField {
-            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                struct GeneratedVisitor;
-                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-                    type Value = GeneratedField;
-                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        write!(formatter, "expected one of: {:?}", &FIELDS)
-                    }
-                    #[allow(unused_variables)]
-                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
-                    where
-                        E: serde::de::Error,
-                    {
-                        match value {
-                            "category" => Ok(GeneratedField::Category),
-                            "action" => Ok(GeneratedField::Action),
-                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
-                        }
-                    }
-                }
-                deserializer.deserialize_identifier(GeneratedVisitor)
-            }
-        }
-        struct GeneratedVisitor;
-        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-            type Value = SafetyPolicyRule;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("struct fabric.policy.SafetyPolicyRule")
-            }
-            fn visit_map<V>(self, mut map_: V) -> std::result::Result<SafetyPolicyRule, V::Error>
-                where
-                    V: serde::de::MapAccess<'de>,
-            {
-                let mut category__ = None;
-                let mut action__ = None;
-                while let Some(k) = map_.next_key()? {
-                    match k {
-                        GeneratedField::Category => {
-                            if category__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("category"));
-                            }
-                            category__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::Action => {
-                            if action__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("action"));
-                            }
-                            action__ = Some(map_.next_value::<SafetyAction>()? as i32);
-                        }
-                    }
-                }
-                Ok(SafetyPolicyRule {
-                    category: category__.unwrap_or_default(),
-                    action: action__.unwrap_or_default(),
-                })
-            }
-        }
-        deserializer.deserialize_struct("fabric.policy.SafetyPolicyRule", FIELDS, GeneratedVisitor)
-    }
-}
-impl serde::Serialize for SafetyConfig {
-    #[allow(deprecated)]
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut len = 0;
-        if !self.endpoint_url.is_empty() {
-            len += 1;
-        }
-        if !self.model.is_empty() {
-            len += 1;
-        }
-        if !self.parser.is_empty() {
-            len += 1;
-        }
-        if self.timeout_ms != 0 {
-            len += 1;
-        }
-        if self.fail_mode != 0 {
-            len += 1;
-        }
-        if !self.rules.is_empty() {
-            len += 1;
-        }
-        if self.default_action != 0 {
-            len += 1;
-        }
-        let mut struct_ser = serializer.serialize_struct("fabric.policy.SafetyConfig", len)?;
-        if !self.endpoint_url.is_empty() {
-            struct_ser.serialize_field("endpointUrl", &self.endpoint_url)?;
-        }
-        if !self.model.is_empty() {
-            struct_ser.serialize_field("model", &self.model)?;
-        }
-        if !self.parser.is_empty() {
-            struct_ser.serialize_field("parser", &self.parser)?;
-        }
-        if self.timeout_ms != 0 {
-            struct_ser.serialize_field("timeoutMs", &self.timeout_ms)?;
-        }
-        if self.fail_mode != 0 {
-            let v = FailMode::try_from(self.fail_mode)
-                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.fail_mode)))?;
-            struct_ser.serialize_field("failMode", &v)?;
-        }
-        if !self.rules.is_empty() {
-            struct_ser.serialize_field("rules", &self.rules)?;
-        }
-        if self.default_action != 0 {
-            let v = SafetyAction::try_from(self.default_action)
-                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.default_action)))?;
-            struct_ser.serialize_field("defaultAction", &v)?;
-        }
-        struct_ser.end()
-    }
-}
-impl<'de> serde::Deserialize<'de> for SafetyConfig {
-    #[allow(deprecated)]
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        const FIELDS: &[&str] = &[
-            "endpoint_url",
-            "endpointUrl",
-            "model",
-            "parser",
-            "timeout_ms",
-            "timeoutMs",
-            "fail_mode",
-            "failMode",
-            "rules",
-            "default_action",
-            "defaultAction",
-        ];
-        #[allow(clippy::enum_variant_names)]
-        enum GeneratedField {
-            EndpointUrl,
-            Model,
-            Parser,
-            TimeoutMs,
-            FailMode,
-            Rules,
-            DefaultAction,
-        }
-        impl<'de> serde::Deserialize<'de> for GeneratedField {
-            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                struct GeneratedVisitor;
-                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-                    type Value = GeneratedField;
-                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        write!(formatter, "expected one of: {:?}", &FIELDS)
-                    }
-                    #[allow(unused_variables)]
-                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
-                    where
-                        E: serde::de::Error,
-                    {
-                        match value {
-                            "endpointUrl" | "endpoint_url" => Ok(GeneratedField::EndpointUrl),
-                            "model" => Ok(GeneratedField::Model),
-                            "parser" => Ok(GeneratedField::Parser),
-                            "timeoutMs" | "timeout_ms" => Ok(GeneratedField::TimeoutMs),
-                            "failMode" | "fail_mode" => Ok(GeneratedField::FailMode),
-                            "rules" => Ok(GeneratedField::Rules),
-                            "defaultAction" | "default_action" => Ok(GeneratedField::DefaultAction),
-                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
-                        }
-                    }
-                }
-                deserializer.deserialize_identifier(GeneratedVisitor)
-            }
-        }
-        struct GeneratedVisitor;
-        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
-            type Value = SafetyConfig;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("struct fabric.policy.SafetyConfig")
-            }
-            fn visit_map<V>(self, mut map_: V) -> std::result::Result<SafetyConfig, V::Error>
-                where
-                    V: serde::de::MapAccess<'de>,
-            {
-                let mut endpoint_url__ = None;
-                let mut model__ = None;
-                let mut parser__ = None;
-                let mut timeout_ms__ = None;
-                let mut fail_mode__ = None;
-                let mut rules__ = None;
-                let mut default_action__ = None;
-                while let Some(k) = map_.next_key()? {
-                    match k {
-                        GeneratedField::EndpointUrl => {
-                            if endpoint_url__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("endpointUrl"));
-                            }
-                            endpoint_url__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::Model => {
-                            if model__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("model"));
-                            }
-                            model__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::Parser => {
-                            if parser__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("parser"));
-                            }
-                            parser__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::TimeoutMs => {
-                            if timeout_ms__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("timeoutMs"));
-                            }
-                            timeout_ms__ = 
-                                Some(map_.next_value::<::pbjson::private::NumberDeserialize<_>>()?.0)
-                            ;
-                        }
-                        GeneratedField::FailMode => {
-                            if fail_mode__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("failMode"));
-                            }
-                            fail_mode__ = Some(map_.next_value::<FailMode>()? as i32);
-                        }
-                        GeneratedField::Rules => {
-                            if rules__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("rules"));
-                            }
-                            rules__ = Some(map_.next_value()?);
-                        }
-                        GeneratedField::DefaultAction => {
-                            if default_action__.is_some() {
-                                return Err(serde::de::Error::duplicate_field("defaultAction"));
-                            }
-                            default_action__ = Some(map_.next_value::<SafetyAction>()? as i32);
-                        }
-                    }
-                }
-                Ok(SafetyConfig {
-                    endpoint_url: endpoint_url__.unwrap_or_default(),
-                    model: model__.unwrap_or_default(),
-                    parser: parser__.unwrap_or_default(),
-                    timeout_ms: timeout_ms__.unwrap_or_default(),
-                    fail_mode: fail_mode__.unwrap_or_default(),
-                    rules: rules__.unwrap_or_default(),
-                    default_action: default_action__.unwrap_or_default(),
-                })
-            }
-        }
-        deserializer.deserialize_struct("fabric.policy.SafetyConfig", FIELDS, GeneratedVisitor)
     }
 }

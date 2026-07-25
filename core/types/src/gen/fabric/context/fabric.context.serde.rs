@@ -347,7 +347,7 @@ impl serde::Serialize for Locus {
         let variant = match self {
             Self::Unspecified => "LOCUS_UNSPECIFIED",
             Self::Endpoint => "LOCUS_ENDPOINT",
-            Self::Hosted => "LOCUS_HOSTED",
+            Self::Server => "LOCUS_SERVER",
             Self::Split => "LOCUS_SPLIT",
         };
         serializer.serialize_str(variant)
@@ -362,7 +362,7 @@ impl<'de> serde::Deserialize<'de> for Locus {
         const FIELDS: &[&str] = &[
             "LOCUS_UNSPECIFIED",
             "LOCUS_ENDPOINT",
-            "LOCUS_HOSTED",
+            "LOCUS_SERVER",
             "LOCUS_SPLIT",
         ];
 
@@ -406,7 +406,7 @@ impl<'de> serde::Deserialize<'de> for Locus {
                 match value {
                     "LOCUS_UNSPECIFIED" => Ok(Locus::Unspecified),
                     "LOCUS_ENDPOINT" => Ok(Locus::Endpoint),
-                    "LOCUS_HOSTED" => Ok(Locus::Hosted),
+                    "LOCUS_SERVER" => Ok(Locus::Server),
                     "LOCUS_SPLIT" => Ok(Locus::Split),
                     _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
                 }

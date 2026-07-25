@@ -28,7 +28,7 @@ enum Command {
     Policy,
     /// Probe daemon liveness.
     Health,
-    /// Ask the daemon where a turn would run (endpoint/hosted/split).
+    /// Ask the daemon where a turn would run (endpoint/server/split).
     Classify {
         /// What the turn is trying to do.
         #[arg(long)]
@@ -51,7 +51,7 @@ enum Command {
         /// Classify as if no local model were installed.
         #[arg(long)]
         no_local_model: bool,
-        /// User locus preference: local, hosted, background, none.
+        /// User locus preference: local, server, background, none.
         #[arg(long, default_value = "none")]
         prefer: String,
     },
@@ -120,9 +120,9 @@ fn parse_horizon(s: &str) -> Result<Horizon> {
 fn parse_preference(s: &str) -> Result<UserLocusPref> {
     match s {
         "local" => Ok(UserLocusPref::PreferLocal),
-        "hosted" => Ok(UserLocusPref::PreferHosted),
+        "server" => Ok(UserLocusPref::PreferServer),
         "background" => Ok(UserLocusPref::Background),
         "none" => Ok(UserLocusPref::NoPreference),
-        other => bail!("invalid preference '{other}' (expected local|hosted|background|none)"),
+        other => bail!("invalid preference '{other}' (expected local|server|background|none)"),
     }
 }

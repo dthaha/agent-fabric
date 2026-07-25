@@ -1,10 +1,10 @@
 //! Versioned policy store with hot-reload. Holds the current endpoint and
-//! hosted policies, re-merges them on every load, and hands out fresh gates
+//! server policies, re-merges them on every load, and hands out fresh gates
 //! reflecting the latest merged state — no restart required.
 
 use std::path::Path;
 
-use fabric_types::policy::{EffectivePolicy, EndpointPolicy, HostedPolicy};
+use fabric_types::policy::{EffectivePolicy, EndpointPolicy, ServerPolicy};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -26,16 +26,16 @@ pub enum StoreError {
 #[derive(Debug, Serialize, Deserialize)]
 struct PersistedPolicies {
     endpoint: Option<EndpointPolicy>,
-    hosted: Option<HostedPolicy>,
+    server: Option<ServerPolicy>,
 }
 
-/// Holds the latest endpoint + hosted policies and their merged product.
+/// Holds the latest endpoint + server policies and their merged product.
 /// Loading a new policy version re-merges immediately; the next [`Self::gate`]
 /// call reflects it.
 #[derive(Debug, Default)]
 pub struct PolicyStore {
     endpoint: Option<EndpointPolicy>,
-    hosted: Option<HostedPolicy>,
+    server: Option<ServerPolicy>,
     effective: EffectivePolicy,
 }
 
@@ -65,9 +65,9 @@ impl PolicyStore {
         Ok(())
     }
 
-    /// Store a new hosted policy version and re-merge.
-    pub fn load_hosted(&mut self, policy: HostedPolicy) {
-        self.hosted = Some(policy);
+    /// Store a new server policy version and re-merge.
+    pub fn load_server(&mut self, policy: ServerPolicy) {
+        self.server = Some(policy);
         self.remerge();
     }
 
@@ -87,9 +87,9 @@ impl PolicyStore {
         self.endpoint.as_ref().map(|e| e.version.as_str())
     }
 
-    /// Version of the loaded hosted policy, if any.
-    pub fn hosted_version(&self) -> Option<&str> {
-        self.hosted.as_ref().map(|h| h.version.as_str())
+    /// Version of the loaded server policy, if any.
+    pub fn server_version(&self) -> Option<&str> {
+        self.server.as_ref().map(|h| h.version.as_str())
     }
 
     /// The current merged policy.
@@ -99,8 +99,8 @@ impl PolicyStore {
 
     fn remerge(&mut self) {
         let endpoint = self.endpoint.clone().unwrap_or_default();
-        let hosted = self.hosted.clone().unwrap_or_default();
-        self.effective = merge(&endpoint, &hosted);
+        let server = self.server.clone().unwrap_or_default();
+        self.effective = merge(&endpoint, &server);
     }
 
     /// Persist both policy documents to `path` as JSON.
@@ -108,7 +108,7 @@ impl PolicyStore {
         let path = path.as_ref();
         let persisted = PersistedPolicies {
             endpoint: self.endpoint.clone(),
-            hosted: self.hosted.clone(),
+            server: self.server.clone(),
         };
         let json = serde_json::to_vec_pretty(&persisted)?;
         std::fs::write(path, json).map_err(|source| StoreError::Io {
@@ -127,7 +127,7 @@ impl PolicyStore {
         let persisted: PersistedPolicies = serde_json::from_slice(&bytes)?;
         let mut store = Self {
             endpoint: persisted.endpoint,
-            hosted: persisted.hosted,
+            server: persisted.server,
             effective: EffectivePolicy::default(),
         };
         store.remerge();
@@ -158,8 +158,8 @@ mod tests {
         }
     }
 
-    fn hosted(version: &str) -> HostedPolicy {
-        HostedPolicy {
+    fn server(version: &str) -> ServerPolicy {
+        ServerPolicy {
             policy_id: "hp".into(),
             version: version.into(),
             org_id: "org".into(),
@@ -236,7 +236,7 @@ mod tests {
     fn empty_store_fails_closed() {
         let store = PolicyStore::new();
         assert_eq!(store.endpoint_version(), None);
-        assert_eq!(store.hosted_version(), None);
+        assert_eq!(store.server_version(), None);
         assert!(matches!(
             store.gate().check_tool("fs.read"),
             Decision::Deny(_)
@@ -247,7 +247,7 @@ mod tests {
     fn hot_reload_replaces_rules() {
         let mut store = PolicyStore::new();
         store.load_endpoint(endpoint("v1", vec![allow("shell.*")]));
-        store.load_hosted(hosted("v1"));
+        store.load_server(server("v1"));
         assert_eq!(store.endpoint_version(), Some("v1"));
         assert!(store.gate().check_tool("shell.exec").is_allowed());
 
@@ -260,20 +260,20 @@ mod tests {
     }
 
     #[test]
-    fn hosted_reload_stacks_restrictions() {
+    fn server_reload_stacks_restrictions() {
         let mut store = PolicyStore::new();
         store.load_endpoint(endpoint("v1", vec![allow("shell.*")]));
-        store.load_hosted(hosted("v1"));
+        store.load_server(server("v1"));
         assert!(store.gate().check_tool("shell.exec").is_allowed());
 
-        let mut hp = hosted("v2");
+        let mut hp = server("v2");
         hp.tool_restrictions = vec![ToolRule {
             tool_pattern: "shell.exec".into(),
             action: ToolAction::Deny as i32,
             condition: String::new(),
         }];
-        store.load_hosted(hp);
-        assert_eq!(store.hosted_version(), Some("v2"));
+        store.load_server(hp);
+        assert_eq!(store.server_version(), Some("v2"));
         let gate = store.gate();
         assert!(matches!(gate.check_tool("shell.exec"), Decision::Deny(_)));
         assert!(gate.check_tool("shell.list").is_allowed());
@@ -289,14 +289,14 @@ mod tests {
             action: fabric_types::policy::DlpAction::Redact as i32,
         }];
         store.load_endpoint(ep);
-        let mut hp = hosted("v4");
+        let mut hp = server("v4");
         hp.tool_restrictions = vec![ToolRule {
             tool_pattern: "shell.exec".into(),
             action: ToolAction::Deny as i32,
             condition: String::new(),
         }];
         hp.max_concurrent_sessions = 7;
-        store.load_hosted(hp);
+        store.load_server(hp);
 
         let path =
             std::env::temp_dir().join(format!("fabric-policy-store-{}.json", std::process::id()));
@@ -305,7 +305,7 @@ mod tests {
         std::fs::remove_file(&path).ok();
 
         assert_eq!(loaded.endpoint_version(), Some("v9"));
-        assert_eq!(loaded.hosted_version(), Some("v4"));
+        assert_eq!(loaded.server_version(), Some("v4"));
         assert_eq!(loaded.effective(), store.effective());
 
         let gate = loaded.gate();

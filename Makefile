@@ -1,4 +1,4 @@
-.PHONY: proto endpoint endpoint-cross hosted test check
+.PHONY: proto endpoint endpoint-cross server test check
 
 proto:
 	buf generate
@@ -17,8 +17,8 @@ endpoint-cross:
 	cargo build --release -p fabric-endpoint --target x86_64-unknown-linux-gnu
 	cargo build --release -p fabric-endpoint --target aarch64-unknown-linux-gnu
 
-hosted:
-	docker build -f deploy/docker/Dockerfile.hosted -t fabric-hosted .
+server:
+	docker build -f deploy/docker/Dockerfile.server -t fabric-server .
 
 test:
 	cargo test --workspace

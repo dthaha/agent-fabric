@@ -1,5 +1,5 @@
 //! Offline locus classifier. Decides where each turn thinks (endpoint,
-//! hosted, split) entirely on-device — it never calls home to decide where
+//! server, split) entirely on-device — it never calls home to decide where
 //! to think.
 //!
 //! The architecture is three layers:
@@ -57,7 +57,7 @@ pub enum Horizon {
 #[serde(rename_all = "snake_case")]
 pub enum UserLocusPref {
     PreferLocal,
-    PreferHosted,
+    PreferServer,
     Background,
     #[default]
     NoPreference,
@@ -99,7 +99,7 @@ pub struct ClassifyInput {
     pub user_preference: UserLocusPref,
     /// Advisory from the on-device classifier model. When None, the rules
     /// engine falls back to its own heuristic rules (long horizon → Split,
-    /// high complexity → Hosted, etc.). When Some, the model's suggestion
+    /// high complexity → Server, etc.). When Some, the model's suggestion
     /// is used as the semantic estimate, subject to constraint validation.
     pub model_advisory: Option<ModelAdvisory>,
 }

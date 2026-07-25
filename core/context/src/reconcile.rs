@@ -114,24 +114,24 @@ mod tests {
 
     #[test]
     fn clean_tail_merge_no_conflicts() {
-        // Endpoint wrote seq 1..2, went offline; hosted continued 3..4 from
+        // Endpoint wrote seq 1..2, went offline; server continued 3..4 from
         // a handoff. Reconcile just fills the gap.
         let endpoint = replica("s1", "l1", "endpoint-1");
         for i in 1..=2 {
             let mut e = test_entry(&format!("e{i}"), "s1", "endpoint-1");
             endpoint.append_entry(&mut e).unwrap();
         }
-        let hosted = replica("s1", "l2", "hosted-1");
+        let server = replica("s1", "l2", "server-1");
         for e in endpoint.entries_since("s1", 0).unwrap() {
-            hosted.insert_entry_raw(&e).unwrap();
+            server.insert_entry_raw(&e).unwrap();
         }
         for i in 3..=4 {
-            let mut e = entry_at(&format!("h{i}"), "s1", "hosted-1", 1000 + i);
+            let mut e = entry_at(&format!("h{i}"), "s1", "server-1", 1000 + i);
             e.seq = i as u64;
-            hosted.insert_entry_raw(&e).unwrap();
+            server.insert_entry_raw(&e).unwrap();
         }
 
-        let report = reconcile(&endpoint, &hosted, "s1").unwrap();
+        let report = reconcile(&endpoint, &server, "s1").unwrap();
         assert_eq!(report.applied, 2);
         assert_eq!(report.duplicates, 2);
         assert!(report.conflicts.is_empty());
@@ -142,23 +142,23 @@ mod tests {
     fn divergent_replicas_conflict_deterministically() {
         // Both replicas appended at seq 1 while partitioned.
         let a = replica("s1", "l1", "endpoint-1");
-        let b = replica("s1", "l2", "hosted-1");
+        let b = replica("s1", "l2", "server-1");
 
         let mut ea = entry_at("from-endpoint", "s1", "endpoint-1", 2000);
         ea.seq = 1;
         a.insert_entry_raw(&ea).unwrap();
 
-        let mut eb = entry_at("from-hosted", "s1", "hosted-1", 1000);
+        let mut eb = entry_at("from-server", "s1", "server-1", 1000);
         eb.seq = 1;
         b.insert_entry_raw(&eb).unwrap();
 
-        // Earlier created_at wins the contested seq: from-hosted (t=1000)
+        // Earlier created_at wins the contested seq: from-server (t=1000)
         // keeps seq 1, from-endpoint (t=2000) is moved to the tail.
         let report_ab = reconcile(&a, &b, "s1").unwrap();
         assert_eq!(report_ab.applied, 1);
         assert_eq!(report_ab.conflicts.len(), 1);
         let c = &report_ab.conflicts[0];
-        assert_eq!(c.kept_entry_id, "from-hosted");
+        assert_eq!(c.kept_entry_id, "from-server");
         assert_eq!(c.moved_entry_id, "from-endpoint");
         assert_eq!(c.seq, 1);
         assert_eq!(c.moved_to_seq, 2);
@@ -183,19 +183,19 @@ mod tests {
             .map(|e| (e.seq, e.entry_id))
             .collect();
         assert_eq!(log_a, log_b);
-        assert_eq!(log_a[0], (1, "from-hosted".to_string()));
+        assert_eq!(log_a[0], (1, "from-server".to_string()));
         assert_eq!(log_a[1], (2, "from-endpoint".to_string()));
     }
 
     #[test]
     fn reconcile_is_idempotent() {
         let a = replica("s1", "l1", "endpoint-1");
-        let b = replica("s1", "l2", "hosted-1");
+        let b = replica("s1", "l2", "server-1");
 
         let mut ea = entry_at("e1", "s1", "endpoint-1", 1000);
         ea.seq = 1;
         a.insert_entry_raw(&ea).unwrap();
-        let mut eb = entry_at("h1", "s1", "hosted-1", 900);
+        let mut eb = entry_at("h1", "s1", "server-1", 900);
         eb.seq = 1;
         b.insert_entry_raw(&eb).unwrap();
 

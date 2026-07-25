@@ -36,12 +36,12 @@ impl DaemonState {
             .unwrap_or(false)
     }
 
-    /// True when at least one policy (endpoint or hosted) is loaded. Until
+    /// True when at least one policy (endpoint or server) is loaded. Until
     /// then the daemon is not ready: the fail-closed gate denies everything.
     pub fn policy_loaded(&self) -> bool {
         self.policy
             .read()
-            .map(|p| p.endpoint_version().is_some() || p.hosted_version().is_some())
+            .map(|p| p.endpoint_version().is_some() || p.server_version().is_some())
             .unwrap_or(false)
     }
 }

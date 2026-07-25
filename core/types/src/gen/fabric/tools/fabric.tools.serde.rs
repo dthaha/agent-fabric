@@ -636,7 +636,7 @@ impl serde::Serialize for ToolLocality {
         let variant = match self {
             Self::Unspecified => "TOOL_LOCALITY_UNSPECIFIED",
             Self::EndpointOnly => "TOOL_LOCALITY_ENDPOINT_ONLY",
-            Self::HostedOk => "TOOL_LOCALITY_HOSTED_OK",
+            Self::ServerOk => "TOOL_LOCALITY_SERVER_OK",
             Self::Either => "TOOL_LOCALITY_EITHER",
         };
         serializer.serialize_str(variant)
@@ -651,7 +651,7 @@ impl<'de> serde::Deserialize<'de> for ToolLocality {
         const FIELDS: &[&str] = &[
             "TOOL_LOCALITY_UNSPECIFIED",
             "TOOL_LOCALITY_ENDPOINT_ONLY",
-            "TOOL_LOCALITY_HOSTED_OK",
+            "TOOL_LOCALITY_SERVER_OK",
             "TOOL_LOCALITY_EITHER",
         ];
 
@@ -695,7 +695,7 @@ impl<'de> serde::Deserialize<'de> for ToolLocality {
                 match value {
                     "TOOL_LOCALITY_UNSPECIFIED" => Ok(ToolLocality::Unspecified),
                     "TOOL_LOCALITY_ENDPOINT_ONLY" => Ok(ToolLocality::EndpointOnly),
-                    "TOOL_LOCALITY_HOSTED_OK" => Ok(ToolLocality::HostedOk),
+                    "TOOL_LOCALITY_SERVER_OK" => Ok(ToolLocality::ServerOk),
                     "TOOL_LOCALITY_EITHER" => Ok(ToolLocality::Either),
                     _ => Err(serde::de::Error::unknown_variant(value, FIELDS)),
                 }

@@ -55,7 +55,7 @@ pub struct ToolDescriptor {
     pub required_permissions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// CUA (computer-use actuator) capture request. The actuator stays on the
-/// endpoint; a hosted brain reaches it via the authenticated tool bridge.
+/// endpoint; a server-side brain reaches it via the authenticated tool bridge.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CuaCaptureRequest {
@@ -85,7 +85,7 @@ pub struct CuaActionRequest {
 pub enum ToolLocality {
     Unspecified = 0,
     EndpointOnly = 1,
-    HostedOk = 2,
+    ServerOk = 2,
     Either = 3,
 }
 impl ToolLocality {
@@ -97,7 +97,7 @@ impl ToolLocality {
         match self {
             ToolLocality::Unspecified => "TOOL_LOCALITY_UNSPECIFIED",
             ToolLocality::EndpointOnly => "TOOL_LOCALITY_ENDPOINT_ONLY",
-            ToolLocality::HostedOk => "TOOL_LOCALITY_HOSTED_OK",
+            ToolLocality::ServerOk => "TOOL_LOCALITY_SERVER_OK",
             ToolLocality::Either => "TOOL_LOCALITY_EITHER",
         }
     }
@@ -106,7 +106,7 @@ impl ToolLocality {
         match value {
             "TOOL_LOCALITY_UNSPECIFIED" => Some(Self::Unspecified),
             "TOOL_LOCALITY_ENDPOINT_ONLY" => Some(Self::EndpointOnly),
-            "TOOL_LOCALITY_HOSTED_OK" => Some(Self::HostedOk),
+            "TOOL_LOCALITY_SERVER_OK" => Some(Self::ServerOk),
             "TOOL_LOCALITY_EITHER" => Some(Self::Either),
             _ => None,
         }

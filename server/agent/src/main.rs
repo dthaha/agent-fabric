@@ -1,4 +1,4 @@
-//! Hosted agent loop server: runs turns for sessions whose lease is hosted
+//! Server-side agent loop: runs turns for sessions whose lease is server-side
 //! (long-horizon, background, or weak-endpoint cases) and calls endpoint
 //! tools over the authenticated bridge. Leased with the context plane.
 
@@ -8,12 +8,12 @@ use tracing::info;
 #[tokio::main]
 async fn main() -> Result<()> {
     let telemetry = fabric_telemetry::init_telemetry(fabric_telemetry::TelemetryConfig {
-        service_name: "fabric-hosted-server".into(),
+        service_name: "fabric-server".into(),
         service_version: env!("CARGO_PKG_VERSION").into(),
     })
     .context("initializing telemetry")?;
 
-    info!("fabric-hosted starting (agent loop server lands in a later phase)");
+    info!("fabric-server starting (agent loop server lands in a later phase)");
 
     wait_for_shutdown_signal().await;
     info!("shutdown complete");

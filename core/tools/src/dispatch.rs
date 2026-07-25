@@ -238,7 +238,7 @@ mod tests {
     fn allow_all_gate() -> PolicyGate {
         PolicyGate::new(EffectivePolicy {
             endpoint_version: "test".into(),
-            hosted_version: "test".into(),
+            server_version: "test".into(),
             data_rules: vec![],
             tool_rules: vec![ToolRule {
                 tool_pattern: "*".into(),
@@ -259,7 +259,7 @@ mod tests {
     fn deny_all_gate() -> PolicyGate {
         PolicyGate::new(EffectivePolicy {
             endpoint_version: "test".into(),
-            hosted_version: "test".into(),
+            server_version: "test".into(),
             data_rules: vec![],
             tool_rules: vec![],
             model_rules: vec![],
@@ -346,7 +346,7 @@ mod tests {
     fn kill_switch_gate() -> PolicyGate {
         PolicyGate::new(EffectivePolicy {
             endpoint_version: "test".into(),
-            hosted_version: "test".into(),
+            server_version: "test".into(),
             data_rules: vec![],
             tool_rules: vec![ToolRule {
                 tool_pattern: "*".into(),

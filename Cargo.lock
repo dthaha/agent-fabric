@@ -571,22 +571,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fabric-hosted"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "fabric-context",
- "fabric-policy",
- "fabric-telemetry",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "fabric-inference"
 version = "0.1.0"
 dependencies = [
@@ -647,6 +631,22 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "fabric-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "fabric-context",
+ "fabric-policy",
+ "fabric-telemetry",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

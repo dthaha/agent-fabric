@@ -31,11 +31,11 @@ pub enum EvalError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelLocus {
     Local,
-    Hosted,
+    Server,
 }
 
 /// The policy gate. Constructed from an EffectivePolicy (the merged product
-/// of endpoint + hosted policy) and consulted before every privileged act.
+/// of endpoint + server policy) and consulted before every privileged act.
 pub struct PolicyGate {
     effective: EffectivePolicy,
     dlp_patterns: Vec<DlpPattern>,
@@ -125,7 +125,7 @@ impl PolicyGate {
             }
             let allowed = match locus {
                 ModelLocus::Local => rule.allowed_local,
-                ModelLocus::Hosted => rule.allowed_hosted,
+                ModelLocus::Server => rule.allowed_server,
             };
             if !allowed {
                 return Decision::Deny(format!(
@@ -137,8 +137,8 @@ impl PolicyGate {
         Decision::Allow
     }
 
-    /// Gate a request to run the loop in the background (hosted) against the
-    /// hosted background quota. No quota configured means no restriction.
+    /// Gate a request to run the loop in the background (server-side) against the
+    /// server background quota. No quota configured means no restriction.
     pub fn check_background_quota(
         &self,
         active_background: u32,
@@ -159,10 +159,10 @@ impl PolicyGate {
                 quota.max_concurrent_background
             ));
         }
-        if quota.max_daily_hosted_turns > 0 && daily_turns_used >= quota.max_daily_hosted_turns {
+        if quota.max_daily_server_turns > 0 && daily_turns_used >= quota.max_daily_server_turns {
             return Decision::Deny(format!(
-                "daily hosted turn budget {} exhausted",
-                quota.max_daily_hosted_turns
+                "daily server turn budget {} exhausted",
+                quota.max_daily_server_turns
             ));
         }
         if quota.require_user_consent && !user_consented {
@@ -171,7 +171,7 @@ impl PolicyGate {
         Decision::Allow
     }
 
-    /// Gate session lifecycle against the hosted session limits. Zero on
+    /// Gate session lifecycle against the server session limits. Zero on
     /// either limit means unlimited.
     pub fn check_session_limits(&self, session_age_hours: f64, active_sessions: u32) -> Decision {
         if self.is_killed() {
@@ -200,7 +200,7 @@ impl PolicyGate {
             .min()
     }
 
-    /// Gate a hosted inference request against the hosted inference rules.
+    /// Gate a server-side inference request against the server-side inference rules.
     pub fn check_inference(&self, provider: &str, model: &str, tokens: u32) -> Decision {
         if self.is_killed() {
             return Decision::Deny("kill switch engaged".into());
@@ -355,7 +355,7 @@ pub struct DlpOutcome {
 
 /// Evaluate a rule condition against the execution context. Conditions are
 /// simple `key=value` expressions AND-joined with `&&`. Supported keys:
-/// `locus` (endpoint|hosted) and `time` (day = 06:00–18:00, night otherwise).
+/// `locus` (endpoint|server) and `time` (day = 06:00–18:00, night otherwise).
 /// An empty condition always matches; unknown keys or values never match
 /// (fail closed).
 pub fn condition_matches(condition: &str, locus: &str, hour: u32) -> bool {
@@ -420,7 +420,7 @@ mod tests {
     fn gate(tool_rules: Vec<ToolRule>) -> PolicyGate {
         PolicyGate::new(EffectivePolicy {
             endpoint_version: "1".into(),
-            hosted_version: "1".into(),
+            server_version: "1".into(),
             data_rules: vec![],
             tool_rules,
             model_rules: vec![],
@@ -494,13 +494,13 @@ mod tests {
         eff.model_rules = vec![ModelRule {
             model_pattern: "qwen3-*".into(),
             allowed_local: true,
-            allowed_hosted: false,
+            allowed_server: false,
             max_context_tokens: 32768,
         }];
         let g = PolicyGate::new(eff);
         assert!(g.check_model("qwen3-8b", ModelLocus::Local).is_allowed());
         assert!(matches!(
-            g.check_model("qwen3-8b", ModelLocus::Hosted),
+            g.check_model("qwen3-8b", ModelLocus::Server),
             Decision::Deny(_)
         ));
         assert_eq!(g.max_context_tokens("qwen3-8b"), Some(32768));
@@ -548,17 +548,17 @@ mod tests {
                 data_class: "internal".into(),
                 may_leave_device: true,
                 requires_redaction: true,
-                allowed_destinations: vec!["hosted".into()],
+                allowed_destinations: vec!["server".into()],
             },
         ];
         let g = PolicyGate::new(eff);
         assert!(matches!(
-            g.check_data_egress("secret", "hosted"),
+            g.check_data_egress("secret", "server"),
             Decision::Deny(_)
         ));
         assert!(g.check_data_egress("secret", "local").is_allowed());
         assert!(matches!(
-            g.check_data_egress("internal", "hosted"),
+            g.check_data_egress("internal", "server"),
             Decision::RequireApproval(_)
         ));
         assert!(matches!(
@@ -628,7 +628,7 @@ mod tests {
         let mut eff = gate(vec![]).effective().clone();
         eff.background_quota = Some(BackgroundQuota {
             max_concurrent_background: 2,
-            max_daily_hosted_turns: 100,
+            max_daily_server_turns: 100,
             require_user_consent: true,
         });
         let g = PolicyGate::new(eff);
@@ -688,7 +688,7 @@ mod tests {
             condition: condition.into(),
         };
 
-        // locus=endpoint: allows on endpoint, skipped (deny, fail closed) on hosted.
+        // locus=endpoint: allows on endpoint, skipped (deny, fail closed) on server.
         let g = gate(vec![cond_rule(
             "shell.*",
             ToolAction::Allow,
@@ -698,7 +698,7 @@ mod tests {
             .check_tool_with_context("shell.exec", "endpoint", 12)
             .is_allowed());
         assert!(matches!(
-            g.check_tool_with_context("shell.exec", "hosted", 12),
+            g.check_tool_with_context("shell.exec", "server", 12),
             Decision::Deny(_)
         ));
 
@@ -714,7 +714,7 @@ mod tests {
 
         // Empty condition matches everywhere.
         let g = gate(vec![cond_rule("shell.*", ToolAction::Allow, "")]);
-        for locus in ["endpoint", "hosted"] {
+        for locus in ["endpoint", "server"] {
             for hour in [0, 12, 23] {
                 assert!(g
                     .check_tool_with_context("shell.exec", locus, hour)
@@ -736,7 +736,7 @@ mod tests {
             Decision::Deny(_)
         ));
         assert!(matches!(
-            g.check_tool_with_context("shell.exec", "hosted", 10),
+            g.check_tool_with_context("shell.exec", "server", 10),
             Decision::Deny(_)
         ));
 
@@ -744,7 +744,7 @@ mod tests {
         let g = gate(vec![cond_rule(
             "shell.*",
             ToolAction::Allow,
-            "locus=hosted",
+            "locus=server",
         )]);
         assert!(g.check_tool("shell.exec").is_allowed());
 

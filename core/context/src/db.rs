@@ -833,7 +833,7 @@ pub(crate) mod tests {
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
             .unwrap();
         let err = store
-            .acquire_lease("s1", "hosted-1", Locus::Hosted, 30_000)
+            .acquire_lease("s1", "server-1", Locus::Server, 30_000)
             .unwrap_err();
         assert!(matches!(err, StoreError::LeaseConflict(_)));
     }
@@ -848,14 +848,14 @@ pub(crate) mod tests {
             .unwrap();
 
         let lease = store
-            .acquire_lease("s1", "hosted-1", Locus::Hosted, 30_000)
+            .acquire_lease("s1", "server-1", Locus::Server, 30_000)
             .unwrap();
-        assert_eq!(lease.holder_id, "hosted-1");
+        assert_eq!(lease.holder_id, "server-1");
         assert_eq!(
             store.lease(&crashed.lease_id).unwrap().state,
             LeaseState::Expired as i32
         );
-        let mut e1 = test_entry("e1", "s1", "hosted-1");
+        let mut e1 = test_entry("e1", "s1", "server-1");
         assert_eq!(store.append_entry(&mut e1).unwrap(), 1);
     }
 
@@ -1108,7 +1108,7 @@ pub(crate) mod tests {
             .grant_lease(&test_lease("l1", "s1", "endpoint-1"))
             .unwrap();
         let err = store
-            .grant_lease(&test_lease("l2", "s1", "hosted-1"))
+            .grant_lease(&test_lease("l2", "s1", "server-1"))
             .unwrap_err();
         assert!(matches!(err, StoreError::LeaseConflict(_)));
     }

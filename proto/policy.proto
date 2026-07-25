@@ -3,7 +3,7 @@ syntax = "proto3";
 package fabric.policy;
 
 // Endpoint policy: the MDM-shipped ceiling. The endpoint can tighten, never
-// loosen. Merged with the hosted policy using deny-wins semantics.
+// loosen. Merged with the server-side policy using deny-wins semantics.
 message EndpointPolicy {
   string policy_id = 1;
   string version = 2;
@@ -18,9 +18,9 @@ message EndpointPolicy {
   SafetyConfig safety = 11;
 }
 
-// Hosted policy: additive rules applied by the hosted runtime. Never loosens
-// the endpoint ceiling.
-message HostedPolicy {
+// Server policy: additive rules applied by the server-side runtime. Never
+// loosens the endpoint ceiling.
+message ServerPolicy {
   string policy_id = 1;
   string version = 2;
   string org_id = 3;
@@ -54,7 +54,7 @@ enum ToolAction {
 message ModelRule {
   string model_pattern = 1;
   bool allowed_local = 2;
-  bool allowed_hosted = 3;
+  bool allowed_server = 3;
   uint32 max_context_tokens = 4;
 }
 
@@ -119,15 +119,15 @@ message InferenceRule {
 
 message BackgroundQuota {
   uint32 max_concurrent_background = 1;
-  uint32 max_daily_hosted_turns = 2;
+  uint32 max_daily_server_turns = 2;
   bool require_user_consent = 3;
 }
 
-// The merged result of endpoint + hosted policy. Computed by the dual policy
+// The merged result of endpoint + server policy. Computed by the dual policy
 // engine with deny-wins semantics; this is what the eval gate consumes.
 message EffectivePolicy {
   string endpoint_version = 1;
-  string hosted_version = 2;
+  string server_version = 2;
   repeated DataClassRule data_rules = 3;
   repeated ToolRule tool_rules = 4;
   repeated ModelRule model_rules = 5;

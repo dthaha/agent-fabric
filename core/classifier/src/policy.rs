@@ -4,7 +4,7 @@
 //! 2. RulesClassifier validates against hard constraints, uses the
 //!    advisory if present, falls back to heuristics if not
 //! 3. PolicyAwareClassifier re-checks the result against the effective
-//!    policy and downgrades hosted/split → endpoint when policy forbids it
+//!    policy and downgrades server/split → endpoint when policy forbids it
 //!
 //! The model informs, the rules decide, the policy vetoes.
 
@@ -13,7 +13,7 @@ use fabric_types::context::Locus;
 
 use crate::{ClassifyInput, LocusClassifier, LocusDecision};
 
-/// Wraps any [`LocusClassifier`] with a [`PolicyGate`]. Hosted and split
+/// Wraps any [`LocusClassifier`] with a [`PolicyGate`]. Server and split
 /// decisions are validated before they are returned; endpoint decisions
 /// pass through untouched.
 pub struct PolicyAwareClassifier<C: LocusClassifier> {
@@ -44,22 +44,22 @@ impl<C: LocusClassifier> PolicyAwareClassifier<C> {
 impl<C: LocusClassifier> LocusClassifier for PolicyAwareClassifier<C> {
     fn classify(&self, input: &ClassifyInput) -> LocusDecision {
         let decision = self.inner.classify(input);
-        if !matches!(decision.locus, Locus::Hosted | Locus::Split) {
+        if !matches!(decision.locus, Locus::Server | Locus::Split) {
             return decision;
         }
         // The gate denies everything while the kill switch is engaged.
         if self.gate.is_killed() {
             return Self::downgrade(&decision, "kill switch engaged");
         }
-        // Hosted inference needs at least one provider rule; without one the
-        // gate fails closed on every request, so hosted is not available.
+        // Server-side inference needs at least one provider rule; without one the
+        // gate fails closed on every request, so server is not available.
         if self.gate.effective().inference_rules.is_empty() {
-            return Self::downgrade(&decision, "no hosted inference rules in policy");
+            return Self::downgrade(&decision, "no server-side inference rules in policy");
         }
         // Every data class touched by this turn must be allowed to reach the
-        // hosted destination.
+        // server destination.
         for class in &input.data_classes {
-            if let Decision::Deny(reason) = self.gate.check_data_egress(class, "hosted") {
+            if let Decision::Deny(reason) = self.gate.check_data_egress(class, "server") {
                 return Self::downgrade(&decision, &reason);
             }
         }

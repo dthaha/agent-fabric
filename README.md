@@ -6,7 +6,7 @@ Enterprise agent continuity fabric. Open source, Apache-2.0.
 
 ## What this is
 
-Agent Fabric solves one problem: **strict session context continuity across loci** (endpoint, hosted, split, offline), with memory soft and tools sticky to the endpoint. An agent turn can start on a managed laptop, hand off to a hosted runtime for a long-horizon task, survive a device switch, and reconcile after an offline stretch — without losing a single context entry.
+Agent Fabric solves one problem: **strict session context continuity across loci** (endpoint, server, split, offline), with memory soft and tools sticky to the endpoint. An agent turn can start on a managed laptop, hand off to a server-side runtime for a long-horizon task, survive a device switch, and reconcile after an offline stretch — without losing a single context entry.
 
 ## What this is NOT
 
@@ -18,12 +18,12 @@ Agent Fabric solves one problem: **strict session context continuity across loci
 
 ```
 1. Identity & trust     — enterprise IdP + device attestation (MDM enrollment)
-2. Policy plane         — dual: endpoint MDM ceiling + hosted additive. DENY WINS.
-3. Memory plane         — NO LEASE. Hosted SoT (Honcho-class) + opportunistic endpoint cache.
+2. Policy plane         — dual: endpoint MDM ceiling + server additive. DENY WINS.
+3. Memory plane         — NO LEASE. Server-side SoT (Honcho-class) + opportunistic endpoint cache.
 4. Context plane        — LEASED. Single-writer op-log. THE SPINE.
 5. Runtime plane        — LEASED with context. Who runs the loop this turn.
 6. Tool plane           — location-transparent. Same interface at every locus. Terminal = catch-all, CUA = escape hatch.
-7. Inference plane      — swappable commodity. Hosted = admin-configured. Endpoint = seeded.
+7. Inference plane      — swappable commodity. Server = admin-configured. Endpoint = seeded.
 8. Model plane          — endpoint seeding. OS-native runtimes behind unified catalog.
 9. Agent integration    — adapter (BYO) + day-0 harness (full features).
 ```
@@ -45,7 +45,7 @@ proto/              shared contracts (protobuf, buf-managed)
 core/               continuity engine (always compiled)
 enterprise/         enterprise features (feature-flagged, OPEN SOURCE)
 endpoint/           endpoint binary (MDM-shipped)
-hosted/             hosted runtime (k8s/docker/VM)
+server/             server-side runtime (k8s/docker/VM)
 harness/            first-party reference agent (TypeScript)
 sdk/                published packages
 admin/              admin console (TypeScript web app)
@@ -59,7 +59,7 @@ tests/              integration + e2e
 ```bash
 make proto      # buf generate (proto/ → Rust gen files)
 make endpoint   # cargo build --release -p fabric-endpoint
-make hosted     # docker build -f deploy/docker/Dockerfile.hosted
+make server     # docker build -f deploy/docker/Dockerfile.server
 make test       # cargo test --workspace
 make check      # clippy + fmt
 ```
@@ -124,11 +124,11 @@ All parsers implement the `SafetyParser` trait. Adding a new model = implement o
 
 ### Endpoint-side (future)
 
-When the endpoint daemon runs client-side, the safety model is seeded locally via the model catalog and inferred on-device through llama.cpp. Same `SafetyVerdict` schema, same policy rules — but inference is local, no round-trip to hosted. The endpoint never calls home to decide if content is safe.
+When the endpoint daemon runs client-side, the safety model is seeded locally via the model catalog and inferred on-device through llama.cpp. Same `SafetyVerdict` schema, same policy rules — but inference is local, no round-trip to the server. The endpoint never calls home to decide if content is safe.
 
 ## Tool plane
 
-Tools behave the same way regardless of where the brain runs. The brain calls `execute(ToolRequest)` and gets a `ToolResponse`. It never knows whether the tool ran on the endpoint or in a hosted container.
+Tools behave the same way regardless of where the brain runs. The brain calls `execute(ToolRequest)` and gets a `ToolResponse`. It never knows whether the tool ran on the endpoint or in a server-side container.
 
 **Tool hierarchy:**
 

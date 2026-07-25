@@ -1,32 +1,32 @@
 //! Dual policy merge. The endpoint (MDM-shipped) policy is the ceiling; the
-//! hosted policy is additive. Merge semantics are DENY WINS: nothing in the
-//! hosted policy can loosen an endpoint restriction, and hosted restrictions
+//! server policy is additive. Merge semantics are DENY WINS: nothing in the
+//! server policy can loosen an endpoint restriction, and server restrictions
 //! stack on top. Evaluation precedence is applied in [`crate::eval`]; the
 //! merge preserves every rule so the gate can apply strictest-match.
 
-use fabric_types::policy::{CuaPolicy, EffectivePolicy, EndpointPolicy, HostedPolicy};
+use fabric_types::policy::{CuaPolicy, EffectivePolicy, EndpointPolicy, ServerPolicy};
 
-/// Merge an endpoint policy with a hosted policy into the EffectivePolicy
+/// Merge an endpoint policy with a server policy into the EffectivePolicy
 /// consumed by the evaluation gate.
-pub fn merge(endpoint: &EndpointPolicy, hosted: &HostedPolicy) -> EffectivePolicy {
-    // Tool rules: endpoint rules plus hosted restrictions. Deny-wins
+pub fn merge(endpoint: &EndpointPolicy, server: &ServerPolicy) -> EffectivePolicy {
+    // Tool rules: endpoint rules plus server restrictions. Deny-wins
     // precedence is resolved at evaluation time across this combined set.
     let mut tool_rules = endpoint.tool_rules.clone();
-    tool_rules.extend(hosted.tool_restrictions.iter().cloned());
+    tool_rules.extend(server.tool_restrictions.iter().cloned());
 
     EffectivePolicy {
         endpoint_version: endpoint.version.clone(),
-        hosted_version: hosted.version.clone(),
+        server_version: server.version.clone(),
         data_rules: endpoint.data_rules.clone(),
         tool_rules,
         model_rules: endpoint.model_rules.clone(),
         cua: endpoint.cua.clone(),
-        inference_rules: hosted.inference_rules.clone(),
+        inference_rules: server.inference_rules.clone(),
         kill_switch: endpoint.kill_switch,
         max_retention_hours: endpoint.max_retention_hours,
-        background_quota: hosted.background_quota,
-        max_session_duration_hours: hosted.max_session_duration_hours,
-        max_concurrent_sessions: hosted.max_concurrent_sessions,
+        background_quota: server.background_quota,
+        max_session_duration_hours: server.max_session_duration_hours,
+        max_concurrent_sessions: server.max_concurrent_sessions,
     }
 }
 
@@ -67,8 +67,8 @@ mod tests {
         }
     }
 
-    fn hosted_policy() -> HostedPolicy {
-        HostedPolicy {
+    fn server_policy() -> ServerPolicy {
+        ServerPolicy {
             policy_id: "hp-1".into(),
             version: "7".into(),
             org_id: "org-1".into(),
@@ -92,10 +92,10 @@ mod tests {
 
     #[test]
     fn merge_stacks_tool_rules_from_both_sides() {
-        let eff = merge(&endpoint_policy(), &hosted_policy());
+        let eff = merge(&endpoint_policy(), &server_policy());
         assert_eq!(eff.tool_rules.len(), 2);
         assert_eq!(eff.endpoint_version, "3");
-        assert_eq!(eff.hosted_version, "7");
+        assert_eq!(eff.server_version, "7");
         assert_eq!(eff.inference_rules.len(), 1);
         assert_eq!(eff.max_retention_hours, 720);
         assert!(!eff.kill_switch);
@@ -105,7 +105,7 @@ mod tests {
     fn merge_preserves_kill_switch_from_endpoint() {
         let mut ep = endpoint_policy();
         ep.kill_switch = true;
-        let eff = merge(&ep, &hosted_policy());
+        let eff = merge(&ep, &server_policy());
         assert!(eff.kill_switch);
     }
 }

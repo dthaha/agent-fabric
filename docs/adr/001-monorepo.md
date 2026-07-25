@@ -6,7 +6,7 @@
 ## Context
 
 Agent Fabric is an enterprise agent continuity fabric spanning endpoint
-binaries, a hosted runtime, shared wire contracts, SDKs, a reference agent,
+binaries, a server-side runtime, shared wire contracts, SDKs, a reference agent,
 and an admin console. We needed to decide on repo topology, the primary
 implementation language, and the licensing/distribution model before
 scaffolding.
@@ -15,19 +15,19 @@ scaffolding.
 
 ### Monorepo
 
-One repository holds all planes: `proto/`, `core/`, `endpoint/`, `hosted/`,
+One repository holds all planes: `proto/`, `core/`, `endpoint/`, `server/`,
 `enterprise/`, `sdk/`, `harness/`, `admin/`, `deploy/`, `tests/`.
 
 - The product is defined by cross-plane invariants (leased context,
   deny-wins policy, device-sticky tools). A change to a lease invariant
-  touches proto, context plane, endpoint daemon, and hosted runtime
+  touches proto, context plane, endpoint daemon, and server-side runtime
   atomically; a monorepo makes that one commit and one CI run.
 - Proto contracts are the source of truth; co-locating generated code and
   consumers eliminates version skew between repos.
 - Integration and E2E tests (continuity, offline, policy, CUA) need every
   component at the same revision.
 
-### Rust for core, endpoint, and hosted
+### Rust for core, endpoint, and server
 
 - The endpoint daemon must be a **single static binary** with no runtime
   dependencies on managed laptops (MDM-shipped to macOS, Windows, Linux).

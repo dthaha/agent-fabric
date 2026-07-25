@@ -82,13 +82,13 @@ async fn status(State(state): State<Arc<DaemonState>>) -> Json<Value> {
         .ok()
         .and_then(|store| store.active_session_count().ok())
         .unwrap_or(0);
-    let (endpoint_version, hosted_version) = state
+    let (endpoint_version, server_version) = state
         .policy
         .read()
         .map(|p| {
             (
                 p.endpoint_version().unwrap_or("").to_string(),
-                p.hosted_version().unwrap_or("").to_string(),
+                p.server_version().unwrap_or("").to_string(),
             )
         })
         .unwrap_or_default();
@@ -97,9 +97,9 @@ async fn status(State(state): State<Arc<DaemonState>>) -> Json<Value> {
         "version": VERSION,
         "uptime_secs": state.started.elapsed().as_secs(),
         "policy_endpoint_version": endpoint_version,
-        "policy_hosted_version": hosted_version,
+        "policy_server_version": server_version,
         "context_db_path": state.cfg.context_db.display().to_string(),
-        "hosted_url": state.cfg.hosted_url,
+        "server_url": state.cfg.server_url,
         "active_sessions": active_sessions,
         "tool_bridge_port": state.cfg.tool_bridge_port,
     }))
@@ -140,7 +140,7 @@ async fn policy(State(state): State<Arc<DaemonState>>) -> Json<Value> {
     let effective = policy.effective();
     Json(json!({
         "endpoint_version": policy.endpoint_version().unwrap_or(""),
-        "hosted_version": policy.hosted_version().unwrap_or(""),
+        "server_version": policy.server_version().unwrap_or(""),
         "tool_rule_count": effective.tool_rules.len(),
         "kill_switch": effective.kill_switch,
         "cua_enabled": effective.cua.as_ref().is_some_and(|c| c.enabled),
@@ -286,7 +286,7 @@ mod tests {
         let (code, body) = get(&app, "/policy").await;
         assert_eq!(code, StatusCode::OK);
         assert_eq!(body["endpoint_version"], "v3");
-        assert_eq!(body["hosted_version"], "");
+        assert_eq!(body["server_version"], "");
         assert_eq!(body["tool_rule_count"], 2);
         assert_eq!(body["kill_switch"], true);
         assert_eq!(body["cua_enabled"], true);
@@ -297,7 +297,7 @@ mod tests {
         let state = test_state();
         let app = router(state);
 
-        // Rules say hosted (explicit preference, network up) but no policy is
+        // Rules say server (explicit preference, network up) but no policy is
         // loaded, so the gate has no inference rules and the wrapper
         // downgrades to endpoint.
         let body = json!({
@@ -308,7 +308,7 @@ mod tests {
             "data_classes": ["public"],
             "network_available": true,
             "local_model_available": true,
-            "user_preference": "prefer_hosted",
+            "user_preference": "prefer_server",
         });
         let res = app
             .oneshot(
@@ -342,7 +342,7 @@ mod tests {
         let (code, body) = get(&app, "/status").await;
         assert_eq!(code, StatusCode::OK);
         assert_eq!(body["policy_endpoint_version"], "v3");
-        assert_eq!(body["policy_hosted_version"], "");
+        assert_eq!(body["policy_server_version"], "");
         assert_eq!(body["active_sessions"], 0);
         assert_eq!(body["tool_bridge_port"], 47771);
         assert!(body["uptime_secs"].is_number());
