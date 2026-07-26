@@ -1,4 +1,4 @@
-.PHONY: proto endpoint endpoint-cross server test check
+.PHONY: proto endpoint endpoint-cross server test check eval-decoder
 
 proto:
 	buf generate
@@ -26,3 +26,9 @@ test:
 check:
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo fmt --all -- --check
+
+# Live conflict-decoder eval against a real endpoint. Opt-in; requires
+# OPENAI_BASE_URL + FABRIC_DECODER_MODEL (OPENAI_API_KEY if the endpoint
+# needs auth). Not run in CI — the DRY eval runs in `make test` instead.
+eval-decoder:
+	cargo test -p fabric-context --test decoder_eval live -- --ignored --nocapture

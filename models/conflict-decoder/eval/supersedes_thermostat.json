@@ -1,0 +1,27 @@
+{
+  "name": "supersedes_thermostat",
+  "expected_relation": "SUPERSEDES",
+  "input": {
+    "session_id": "s-home-1",
+    "entry_id_a": "e-9a41",
+    "entry_id_b": "e-9a55",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {"temperature": "72"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {"temperature": "68"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-11", "seq": 11, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "set the thermostat to 72"},
+      {"entry_id": "a-12", "seq": 12, "kind": "ENTRY_KIND_ASSISTANT_MESSAGE", "content": "done, thermostat set to 72"},
+      {"entry_id": "u-13", "seq": 13, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "actually it's too warm, make it 68"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"SUPERSEDES\",\"shared_entities\":[{\"entity_type\":\"tool\",\"entity_id\":\"set_thermostat\"},{\"entity_type\":\"target\",\"entity_id\":\"home:living-room\"},{\"entity_type\":\"param\",\"entity_id\":\"temperature\"}],\"confidence\":0.98,\"explanation\":\"The user refined the same thermostat setting from 72 to 68, so B is a newer revision of A's intent.\"}"
+}

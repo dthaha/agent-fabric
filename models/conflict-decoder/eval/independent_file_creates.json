@@ -1,0 +1,26 @@
+{
+  "name": "independent_file_creates",
+  "expected_relation": "INDEPENDENT",
+  "input": {
+    "session_id": "s-dev-1",
+    "entry_id_a": "e-8d30",
+    "entry_id_b": "e-8d36",
+    "call_a": {
+      "tool_name": "create_file",
+      "target": "fs:/repo/src/auth.rs",
+      "params": {"content": "pub fn login() {}"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_file",
+      "target": "fs:/repo/src/billing.rs",
+      "params": {"content": "pub fn charge() {}"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-22", "seq": 22, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "scaffold the auth module on this branch"},
+      {"entry_id": "u-25", "seq": 25, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "(surface: laptop, offline branch) scaffold the billing module"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"INDEPENDENT\",\"shared_entities\":[{\"entity_type\":\"tool\",\"entity_id\":\"create_file\"}],\"confidence\":0.94,\"explanation\":\"Both calls create files but at different paths for different modules, so they are separate actions that do not interact.\"}"
+}

@@ -1,0 +1,26 @@
+{
+  "name": "contradicts_cancel_expedite",
+  "expected_relation": "CONTRADICTS",
+  "input": {
+    "session_id": "s-shop-1",
+    "entry_id_a": "e-1a02",
+    "entry_id_b": "e-1a07",
+    "call_a": {
+      "tool_name": "cancel_order",
+      "target": "order:8891",
+      "params": {"reason": "changed my mind"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "expedite_order",
+      "target": "order:8891",
+      "params": {"shipping": "overnight"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-5", "seq": 5, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "cancel order 8891, I don't need it"},
+      {"entry_id": "u-9", "seq": 9, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "(surface: laptop, offline branch) rush order 8891, I need it tomorrow"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"CONTRADICTS\",\"shared_entities\":[{\"entity_type\":\"target\",\"entity_id\":\"order:8891\"}],\"confidence\":0.88,\"explanation\":\"Cancelling and expediting the same order are opposing intents that cannot both be satisfied, so a decision is required.\"}"
+}

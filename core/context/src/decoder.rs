@@ -42,6 +42,12 @@ pub enum DecoderError {
     NotAToolCall(String),
     #[error("unparseable decoder output: {0}")]
     Parse(String),
+    #[error("decoder endpoint misconfigured: {0}")]
+    Config(String),
+    #[error("decoder endpoint error: {0}")]
+    Http(String),
+    #[error("decoder endpoint timed out after {0}ms")]
+    Timeout(u64),
 }
 
 /// The output contract every `ConflictDecoder` impl (and its prompt) is held

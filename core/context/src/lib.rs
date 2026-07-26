@@ -5,6 +5,7 @@
 
 pub mod clock;
 pub mod conflict;
+pub mod constrained_decoder;
 pub mod db;
 pub mod decoder;
 pub mod handoff;
@@ -16,6 +17,10 @@ pub use clock::{is_clock_sane, now_ms, MonotonicClock};
 
 pub use conflict::{
     detect_in_region, detect_pair, StructuralConflict, StructuralDisposition, StructuralVerdict,
+};
+pub use constrained_decoder::{
+    verdict_json_schema, ConstrainedDecoder, ConstrainedDecoderConfig,
+    SYSTEM_PROMPT as DECODER_SYSTEM_PROMPT,
 };
 pub use db::{RollbackReport, SqliteContextStore, StoreError};
 pub use decoder::{

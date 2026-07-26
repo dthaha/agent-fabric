@@ -1,0 +1,25 @@
+{
+  "name": "independent_emails",
+  "expected_relation": "INDEPENDENT",
+  "input": {
+    "session_id": "s-work-1",
+    "entry_id_a": "e-2f01",
+    "entry_id_b": "e-2f09",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:priya@corp.example",
+      "params": {"subject": "Q3 report", "body": "attached"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:tom@corp.example",
+      "params": {"subject": "lunch?", "body": "noon works?"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-20", "seq": 20, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "email the q3 report to priya, and ping tom about lunch"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"INDEPENDENT\",\"shared_entities\":[{\"entity_type\":\"tool\",\"entity_id\":\"send_email\"}],\"confidence\":0.96,\"explanation\":\"Both calls send email but to different recipients with different subjects, so they are separate actions that do not interact.\"}"
+}

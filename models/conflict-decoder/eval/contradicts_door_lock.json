@@ -1,0 +1,27 @@
+{
+  "name": "contradicts_door_lock",
+  "expected_relation": "CONTRADICTS",
+  "input": {
+    "session_id": "s-home-2",
+    "entry_id_a": "e-7c10",
+    "entry_id_b": "e-7c14",
+    "call_a": {
+      "tool_name": "lock_door",
+      "target": "home:front-door",
+      "params": {"locked": "true"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "lock_door",
+      "target": "home:front-door",
+      "params": {"locked": "false"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-40", "seq": 40, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "heading out, lock the front door"},
+      {"entry_id": "a-41", "seq": 41, "kind": "ENTRY_KIND_ASSISTANT_MESSAGE", "content": "front door locked"},
+      {"entry_id": "u-42", "seq": 42, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "(surface: partner-phone) I'm at the door, unlock it"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"CONTRADICTS\",\"shared_entities\":[{\"entity_type\":\"tool\",\"entity_id\":\"lock_door\"},{\"entity_type\":\"target\",\"entity_id\":\"home:front-door\"},{\"entity_type\":\"param\",\"entity_id\":\"locked\"}],\"confidence\":0.9,\"explanation\":\"Locking and unlocking the same door from two different surfaces at nearly the same time cannot both be honored.\"}"
+}

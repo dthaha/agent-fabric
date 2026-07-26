@@ -1,0 +1,23 @@
+{
+  "name": "ambiguous_no_context",
+  "expected_relation": "AMBIGUOUS",
+  "input": {
+    "session_id": "s-ops-1",
+    "entry_id_a": "e-4b77",
+    "entry_id_b": "e-4b81",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:billing",
+      "params": {"mode": "live"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:billing",
+      "params": {"mode": "test"},
+      "idempotency_key": ""
+    },
+    "context": []
+  },
+  "golden_output": "Let me look at this pair.\n```json\n{\"relation\":\"AMBIGUOUS\",\"shared_entities\":[{\"entity_type\":\"tool\",\"entity_id\":\"set_config\"},{\"entity_type\":\"target\",\"entity_id\":\"service:billing\"},{\"entity_type\":\"param\",\"entity_id\":\"mode\"}],\"confidence\":\"0.4\",\"explanation\":\"With no conversation context I cannot tell whether the mode change is a refinement or a genuine disagreement between two intents.\"}\n```\nThat is my classification."
+}

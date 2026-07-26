@@ -1,0 +1,27 @@
+{
+  "name": "borderline_flight_instead",
+  "expected_relation": "SUPERSEDES",
+  "input": {
+    "session_id": "s-travel-1",
+    "entry_id_a": "e-6d20",
+    "entry_id_b": "e-6d29",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:denver-2026-03",
+      "params": {"departure": "09:00", "date": "2026-03-01"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:denver-2026-03",
+      "params": {"departure": "14:00", "date": "2026-03-01"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-31", "seq": 31, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "book the 9am flight to denver"},
+      {"entry_id": "a-32", "seq": 32, "kind": "ENTRY_KIND_ASSISTANT_MESSAGE", "content": "booked, confirmation DL-4410"},
+      {"entry_id": "u-33", "seq": 33, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "my meeting moved — actually get me on the 2pm one instead"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"SUPERSEDES\",\"shared_entities\":[{\"entity_type\":\"tool\",\"entity_id\":\"book_flight\"},{\"entity_type\":\"target\",\"entity_id\":\"trip:denver-2026-03\"},{\"entity_type\":\"param\",\"entity_id\":\"departure\"},{\"entity_type\":\"param\",\"entity_id\":\"date\"}],\"confidence\":0.85,\"explanation\":\"The user's 'instead' makes clear the 2pm booking is a revision of the same trip, so the user would not be surprised that only B stands.\"}"
+}

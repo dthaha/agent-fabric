@@ -1,0 +1,26 @@
+{
+  "name": "supersedes_draft_recipients",
+  "expected_relation": "SUPERSEDES",
+  "input": {
+    "session_id": "s-work-2",
+    "entry_id_a": "e-3e11",
+    "entry_id_b": "e-3e18",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "thread:launch-plan",
+      "params": {"to": "alice@corp.example", "subject": "launch plan v1"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "thread:launch-plan",
+      "params": {"to": "alice@corp.example,bob@corp.example", "subject": "launch plan v2"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-14", "seq": 14, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "send the launch plan to alice"},
+      {"entry_id": "u-16", "seq": 16, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "wait, add bob and use the updated version before it goes out"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"SUPERSEDES\",\"shared_entities\":[{\"entity_type\":\"tool\",\"entity_id\":\"send_email\"},{\"entity_type\":\"target\",\"entity_id\":\"thread:launch-plan\"},{\"entity_type\":\"param\",\"entity_id\":\"to\"},{\"entity_type\":\"param\",\"entity_id\":\"subject\"}],\"confidence\":0.82,\"explanation\":\"The user expanded the recipient list and bumped the draft version of the same email, so B revises A rather than opposing it.\"}"
+}
