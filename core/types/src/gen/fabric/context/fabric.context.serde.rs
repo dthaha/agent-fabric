@@ -736,3 +736,149 @@ impl<'de> serde::Deserialize<'de> for SessionState {
         deserializer.deserialize_any(GeneratedVisitor)
     }
 }
+impl serde::Serialize for ToolCall {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.tool_name.is_empty() {
+            len += 1;
+        }
+        if !self.target.is_empty() {
+            len += 1;
+        }
+        if !self.params.is_empty() {
+            len += 1;
+        }
+        if !self.idempotency_key.is_empty() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.context.ToolCall", len)?;
+        if !self.tool_name.is_empty() {
+            struct_ser.serialize_field("toolName", &self.tool_name)?;
+        }
+        if !self.target.is_empty() {
+            struct_ser.serialize_field("target", &self.target)?;
+        }
+        if !self.params.is_empty() {
+            struct_ser.serialize_field("params", &self.params)?;
+        }
+        if !self.idempotency_key.is_empty() {
+            struct_ser.serialize_field("idempotencyKey", &self.idempotency_key)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ToolCall {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "tool_name",
+            "toolName",
+            "target",
+            "params",
+            "idempotency_key",
+            "idempotencyKey",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            ToolName,
+            Target,
+            Params,
+            IdempotencyKey,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "toolName" | "tool_name" => Ok(GeneratedField::ToolName),
+                            "target" => Ok(GeneratedField::Target),
+                            "params" => Ok(GeneratedField::Params),
+                            "idempotencyKey" | "idempotency_key" => Ok(GeneratedField::IdempotencyKey),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = ToolCall;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.context.ToolCall")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<ToolCall, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut tool_name__ = None;
+                let mut target__ = None;
+                let mut params__ = None;
+                let mut idempotency_key__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::ToolName => {
+                            if tool_name__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("toolName"));
+                            }
+                            tool_name__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Target => {
+                            if target__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("target"));
+                            }
+                            target__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Params => {
+                            if params__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("params"));
+                            }
+                            params__ = Some(
+                                map_.next_value::<std::collections::HashMap<_, _>>()?
+                            );
+                        }
+                        GeneratedField::IdempotencyKey => {
+                            if idempotency_key__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("idempotencyKey"));
+                            }
+                            idempotency_key__ = Some(map_.next_value()?);
+                        }
+                    }
+                }
+                Ok(ToolCall {
+                    tool_name: tool_name__.unwrap_or_default(),
+                    target: target__.unwrap_or_default(),
+                    params: params__.unwrap_or_default(),
+                    idempotency_key: idempotency_key__.unwrap_or_default(),
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.context.ToolCall", FIELDS, GeneratedVisitor)
+    }
+}

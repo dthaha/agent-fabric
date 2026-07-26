@@ -18,6 +18,21 @@ message ContextEntry {
   google.protobuf.Timestamp created_at = 9;
 }
 
+// Structured payload for ENTRY_KIND_TOOL_CALL entries. The entry's opaque
+// `payload` bytes carry a prost-encoded ToolCall. Additive convention: the
+// ContextEntry wire format is unchanged; this defines what goes IN the
+// payload for tool-call kind. Encode/decode helpers live in
+// fabric_context::tool_call.
+message ToolCall {
+  string tool_name = 1;
+  // The entity the tool acts on (path, URL, config key, resource id).
+  string target = 2;
+  map<string, string> params = 3;
+  // Present when the call is idempotent: safe to resolve a param collision
+  // by last-write-wins without escalating to the model tiers.
+  string idempotency_key = 4;
+}
+
 enum EntryKind {
   ENTRY_KIND_UNSPECIFIED = 0;
   ENTRY_KIND_USER_MESSAGE = 1;

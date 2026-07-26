@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::conflict::{detect_in_region, StructuralConflict};
 use crate::db::{timestamp_to_ms, Result};
 use crate::store::ContextStore;
 
@@ -22,12 +23,17 @@ pub struct SeqConflict {
     pub moved_to_seq: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ReconcileReport {
     pub session_id: String,
     pub applied: u64,
     pub duplicates: u64,
+    /// Seq collisions resolved by the deterministic merge (reordered entries).
     pub conflicts: Vec<SeqConflict>,
+    /// Tier 1 structural conflicts detected over the merged region: same
+    /// tool + same target + different params. Model-free; `Escalate`
+    /// dispositions are candidates for the model tiers (Phase E/F).
+    pub structural_conflicts: Vec<StructuralConflict>,
 }
 
 /// Merge all remote entries for `session_id` into the local store.
@@ -42,11 +48,13 @@ pub async fn reconcile(
     };
 
     let remote_entries = remote.entries_since(session_id, 0).await?;
+    let mut applied_ids = std::collections::HashSet::new();
     for remote_entry in remote_entries {
         if local.entry_by_id(&remote_entry.entry_id).await?.is_some() {
             report.duplicates += 1;
             continue;
         }
+        applied_ids.insert(remote_entry.entry_id.clone());
 
         match local.entry_at_seq(session_id, remote_entry.seq).await? {
             None => {
@@ -88,6 +96,18 @@ pub async fn reconcile(
         }
     }
 
+    // Tier 1 structural detection over the merged region, restricted to
+    // pairs involving at least one entry that arrived from the remote side
+    // (a pre-existing collision within one replica is not a merge conflict).
+    // Deterministic, model-free, no I/O beyond the local store read.
+    if !applied_ids.is_empty() {
+        let merged = local.entries_since(session_id, 0).await?;
+        report.structural_conflicts = detect_in_region(&merged)
+            .into_iter()
+            .filter(|c| applied_ids.contains(&c.entry_id_a) || applied_ids.contains(&c.entry_id_b))
+            .collect();
+    }
+
     Ok(report)
 }
 
@@ -97,7 +117,7 @@ mod tests {
     use crate::db::ms_to_timestamp;
     use crate::db::tests::{test_entry, test_lease, test_session};
     use crate::db::SqliteContextStore;
-    use fabric_types::context::ContextEntry;
+    use fabric_types::context::{ContextEntry, EntryKind, ToolCall};
 
     fn replica(session_id: &str, lease_id: &str, holder: &str) -> SqliteContextStore {
         let store = SqliteContextStore::open_in_memory().unwrap();
@@ -207,5 +227,127 @@ mod tests {
         assert_eq!(second.applied, 0);
         assert_eq!(second.duplicates, 1);
         assert!(second.conflicts.is_empty());
+    }
+
+    fn tool_call(tool: &str, target: &str, value: &str, key: &str) -> ToolCall {
+        ToolCall {
+            tool_name: tool.into(),
+            target: target.into(),
+            params: std::collections::HashMap::from([("value".into(), value.into())]),
+            idempotency_key: key.into(),
+        }
+    }
+
+    fn tool_call_entry(id: &str, holder: &str, ms: i64, seq: u64, call: ToolCall) -> ContextEntry {
+        let mut e = entry_at(id, "s1", holder, ms);
+        e.kind = EntryKind::ToolCall as i32;
+        e.payload = crate::tool_call::encode(&call);
+        e.seq = seq;
+        e
+    }
+
+    #[tokio::test]
+    async fn reconcile_surfaces_structural_conflicts() {
+        // Both replicas issued a state-mutating call on the same target with
+        // divergent params while partitioned.
+        let endpoint = replica("s1", "l1", "endpoint-1");
+        let server = replica("s1", "l2", "server-1");
+
+        let local_call = tool_call_entry(
+            "ep-call",
+            "endpoint-1",
+            2000,
+            1,
+            tool_call("set_config", "ui.theme", "dark", ""),
+        );
+        endpoint.insert_entry_raw(&local_call).unwrap();
+        let remote_call = tool_call_entry(
+            "srv-call",
+            "server-1",
+            1000,
+            1,
+            tool_call("set_config", "ui.theme", "light", ""),
+        );
+        server.insert_entry_raw(&remote_call).unwrap();
+
+        let report = reconcile(&endpoint, &server, "s1").await.unwrap();
+        assert_eq!(report.applied, 1);
+        // Seq-collision tracking is untouched and still populated.
+        assert_eq!(report.conflicts.len(), 1);
+        // The structural detector flags the param divergence for escalation.
+        assert_eq!(report.structural_conflicts.len(), 1);
+        let c = &report.structural_conflicts[0];
+        assert_eq!(c.tool_name, "set_config");
+        assert_eq!(c.target, "ui.theme");
+        assert_eq!(
+            c.disposition,
+            crate::conflict::StructuralDisposition::Escalate
+        );
+        assert_eq!(
+            (c.entry_id_a.as_str(), c.entry_id_b.as_str()),
+            ("srv-call", "ep-call")
+        );
+        assert_eq!(c.to_verdict().confidence, 1.0);
+    }
+
+    #[tokio::test]
+    async fn reconcile_lww_resolves_idempotent_collisions() {
+        let endpoint = replica("s1", "l1", "endpoint-1");
+        let server = replica("s1", "l2", "server-1");
+
+        let local_call = tool_call_entry(
+            "ep-call",
+            "endpoint-1",
+            2000,
+            1,
+            tool_call("cache_put", "k1", "1", "req-ep"),
+        );
+        endpoint.insert_entry_raw(&local_call).unwrap();
+        let remote_call = tool_call_entry(
+            "srv-call",
+            "server-1",
+            1000,
+            1,
+            tool_call("cache_put", "k1", "2", "req-srv"),
+        );
+        server.insert_entry_raw(&remote_call).unwrap();
+
+        let report = reconcile(&endpoint, &server, "s1").await.unwrap();
+        assert_eq!(report.structural_conflicts.len(), 1);
+        let c = &report.structural_conflicts[0];
+        assert_eq!(
+            c.disposition,
+            crate::conflict::StructuralDisposition::LastWriteWins
+        );
+        // Later (created_at, entry_id) writes last: ep-call (t=2000) wins.
+        assert_eq!(c.lww_winner_entry_id.as_deref(), Some("ep-call"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_ignores_duplicate_tool_calls() {
+        let endpoint = replica("s1", "l1", "endpoint-1");
+        let server = replica("s1", "l2", "server-1");
+
+        let local_call = tool_call_entry(
+            "ep-call",
+            "endpoint-1",
+            2000,
+            1,
+            tool_call("get", "api/x", "1", ""),
+        );
+        endpoint.insert_entry_raw(&local_call).unwrap();
+        // Same tool + same target + same params: a duplicate, not a conflict.
+        let remote_call = tool_call_entry(
+            "srv-call",
+            "server-1",
+            1000,
+            1,
+            tool_call("get", "api/x", "1", ""),
+        );
+        server.insert_entry_raw(&remote_call).unwrap();
+
+        let report = reconcile(&endpoint, &server, "s1").await.unwrap();
+        assert_eq!(report.applied, 1);
+        assert!(report.structural_conflicts.is_empty());
     }
 }

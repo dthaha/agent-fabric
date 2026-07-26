@@ -445,6 +445,7 @@ dependencies = [
  "async-trait",
  "fabric-types",
  "pbjson-types",
+ "prost 0.13.5",
  "rusqlite",
  "serde",
  "serde_json",

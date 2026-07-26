@@ -9,6 +9,7 @@ repository.workspace = true
 fabric-types = { path = "../types" }
 async-trait.workspace = true
 pbjson-types.workspace = true
+prost.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rusqlite.workspace = true

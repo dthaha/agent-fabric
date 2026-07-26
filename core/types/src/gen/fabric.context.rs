@@ -24,6 +24,26 @@ pub struct ContextEntry {
     #[prost(message, optional, tag="9")]
     pub created_at: ::core::option::Option<::pbjson_types::Timestamp>,
 }
+/// Structured payload for ENTRY_KIND_TOOL_CALL entries. The entry's opaque
+/// `payload` bytes carry a prost-encoded ToolCall. Additive convention: the
+/// ContextEntry wire format is unchanged; this defines what goes IN the
+/// payload for tool-call kind. Encode/decode helpers live in
+/// fabric_context::tool_call.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ToolCall {
+    #[prost(string, tag="1")]
+    pub tool_name: ::prost::alloc::string::String,
+    /// The entity the tool acts on (path, URL, config key, resource id).
+    #[prost(string, tag="2")]
+    pub target: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="3")]
+    pub params: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Present when the call is idempotent: safe to resolve a param collision
+    /// by last-write-wins without escalating to the model tiers.
+    #[prost(string, tag="4")]
+    pub idempotency_key: ::prost::alloc::string::String,
+}
 /// Metadata for a session whose op-log lives in the context plane.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
