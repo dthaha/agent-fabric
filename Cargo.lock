@@ -469,6 +469,7 @@ name = "fabric-context"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "fabric-policy",
  "fabric-types",
  "pbjson-types",
  "prost 0.13.5",

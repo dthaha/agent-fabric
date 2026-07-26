@@ -18,6 +18,8 @@ pub enum ToolError {
     RequiresApproval(String),
     #[error("duplicate tool registration: '{0}'")]
     DuplicateRegistration(String),
+    #[error("tool does not support compensation")]
+    NotCompensable,
 }
 
 /// A tool that can be invoked via ToolRequest.
@@ -29,6 +31,22 @@ pub trait Tool: Send + Sync {
     fn descriptor(&self) -> ToolDescriptor;
     /// Execute the tool
     async fn execute(&self, request: &ToolRequest) -> Result<ToolResponse, ToolError>;
+
+    /// Whether this tool can compensate (undo) a previously executed call.
+    /// Opt-in: tools that mutate reversible state override this to return
+    /// true; the default is false. The Tier 4 conflict policy veto queries
+    /// this before approving a COMPENSATE/ROLLBACK resolution.
+    fn supports_compensation(&self) -> bool {
+        false
+    }
+
+    /// Compensate (undo) a previously executed call. Only invoked when
+    /// [`Tool::supports_compensation`] is true. The default fails closed
+    /// with [`ToolError::NotCompensable`] so existing tools compile and
+    /// behave unchanged.
+    async fn compensate(&self, _request: &ToolRequest) -> Result<ToolResponse, ToolError> {
+        Err(ToolError::NotCompensable)
+    }
 }
 
 /// Registry of available tools. Maps tool names to implementations.
@@ -391,6 +409,17 @@ mod tests {
         request.lease_id = String::new();
         let err = dispatcher.dispatch(request).await.unwrap_err();
         assert!(matches!(err, ToolError::PolicyDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn compensation_defaults_to_unsupported() {
+        let tool = MockTool::new("shell.exec");
+        assert!(!tool.supports_compensation());
+        let err = tool
+            .compensate(&make_request("shell.exec"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::NotCompensable));
     }
 
     #[tokio::test]

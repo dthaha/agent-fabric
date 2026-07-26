@@ -11,6 +11,7 @@ pub mod db;
 pub mod decoder;
 pub mod handoff;
 pub mod mediator;
+pub mod pipeline;
 pub mod reconcile;
 pub mod store;
 pub mod tool_call;
@@ -38,5 +39,6 @@ pub use mediator::{
     parse_proposal, ConflictMediator, MediatorError, MediatorInput, SharedEntityView, StubMediator,
     VerdictView, PROPOSAL_OUTPUT_SCHEMA,
 };
+pub use pipeline::{ConflictPipeline, PipelineError, DEFAULT_CONTEXT_WINDOW};
 pub use reconcile::{reconcile, ReconcileReport, SeqConflict};
 pub use store::ContextStore;
