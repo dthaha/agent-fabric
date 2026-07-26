@@ -16,6 +16,12 @@ message Lease {
   google.protobuf.Timestamp granted_at = 6;
   google.protobuf.Timestamp expires_at = 7;
   LeaseState state = 8;
+  // Server identity that granted the lease. Lease authority is server-side;
+  // granted_at is stamped with the server clock, never the client's.
+  string granted_by = 9;
+  // Surface identity that preempted this lease (latest presence wins), for
+  // audit. Preemption is a presence signal, not a timestamp race.
+  string preempted_by = 10;
 }
 
 enum LeaseState {

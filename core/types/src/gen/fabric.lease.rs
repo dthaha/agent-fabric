@@ -21,6 +21,14 @@ pub struct Lease {
     pub expires_at: ::core::option::Option<::pbjson_types::Timestamp>,
     #[prost(enumeration="LeaseState", tag="8")]
     pub state: i32,
+    /// Server identity that granted the lease. Lease authority is server-side;
+    /// granted_at is stamped with the server clock, never the client's.
+    #[prost(string, tag="9")]
+    pub granted_by: ::prost::alloc::string::String,
+    /// Surface identity that preempted this lease (latest presence wins), for
+    /// audit. Preemption is a presence signal, not a timestamp race.
+    #[prost(string, tag="10")]
+    pub preempted_by: ::prost::alloc::string::String,
 }
 /// Request to transfer the write lease from one holder to another. Handoff is
 /// lease transfer + catch-up, never summarize-and-restart.

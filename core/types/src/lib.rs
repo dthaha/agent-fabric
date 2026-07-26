@@ -30,3 +30,8 @@ pub mod tools {
     include!("gen/fabric.tools.rs");
     include!("gen/fabric/tools/fabric.tools.serde.rs");
 }
+
+pub mod conflict {
+    include!("gen/fabric.conflict.rs");
+    include!("gen/fabric/conflict/fabric.conflict.serde.rs");
+}

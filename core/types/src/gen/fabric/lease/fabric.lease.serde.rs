@@ -364,6 +364,12 @@ impl serde::Serialize for Lease {
         if self.state != 0 {
             len += 1;
         }
+        if !self.granted_by.is_empty() {
+            len += 1;
+        }
+        if !self.preempted_by.is_empty() {
+            len += 1;
+        }
         let mut struct_ser = serializer.serialize_struct("fabric.lease.Lease", len)?;
         if !self.lease_id.is_empty() {
             struct_ser.serialize_field("leaseId", &self.lease_id)?;
@@ -395,6 +401,12 @@ impl serde::Serialize for Lease {
                 .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.state)))?;
             struct_ser.serialize_field("state", &v)?;
         }
+        if !self.granted_by.is_empty() {
+            struct_ser.serialize_field("grantedBy", &self.granted_by)?;
+        }
+        if !self.preempted_by.is_empty() {
+            struct_ser.serialize_field("preemptedBy", &self.preempted_by)?;
+        }
         struct_ser.end()
     }
 }
@@ -419,6 +431,10 @@ impl<'de> serde::Deserialize<'de> for Lease {
             "expires_at",
             "expiresAt",
             "state",
+            "granted_by",
+            "grantedBy",
+            "preempted_by",
+            "preemptedBy",
         ];
 
         #[allow(clippy::enum_variant_names)]
@@ -431,6 +447,8 @@ impl<'de> serde::Deserialize<'de> for Lease {
             GrantedAt,
             ExpiresAt,
             State,
+            GrantedBy,
+            PreemptedBy,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
             fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
@@ -460,6 +478,8 @@ impl<'de> serde::Deserialize<'de> for Lease {
                             "grantedAt" | "granted_at" => Ok(GeneratedField::GrantedAt),
                             "expiresAt" | "expires_at" => Ok(GeneratedField::ExpiresAt),
                             "state" => Ok(GeneratedField::State),
+                            "grantedBy" | "granted_by" => Ok(GeneratedField::GrantedBy),
+                            "preemptedBy" | "preempted_by" => Ok(GeneratedField::PreemptedBy),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
                     }
@@ -487,6 +507,8 @@ impl<'de> serde::Deserialize<'de> for Lease {
                 let mut granted_at__ = None;
                 let mut expires_at__ = None;
                 let mut state__ = None;
+                let mut granted_by__ = None;
+                let mut preempted_by__ = None;
                 while let Some(k) = map_.next_key()? {
                     match k {
                         GeneratedField::LeaseId => {
@@ -539,6 +561,18 @@ impl<'de> serde::Deserialize<'de> for Lease {
                             }
                             state__ = Some(map_.next_value::<LeaseState>()? as i32);
                         }
+                        GeneratedField::GrantedBy => {
+                            if granted_by__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("grantedBy"));
+                            }
+                            granted_by__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::PreemptedBy => {
+                            if preempted_by__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("preemptedBy"));
+                            }
+                            preempted_by__ = Some(map_.next_value()?);
+                        }
                     }
                 }
                 Ok(Lease {
@@ -550,6 +584,8 @@ impl<'de> serde::Deserialize<'de> for Lease {
                     granted_at: granted_at__,
                     expires_at: expires_at__,
                     state: state__.unwrap_or_default(),
+                    granted_by: granted_by__.unwrap_or_default(),
+                    preempted_by: preempted_by__.unwrap_or_default(),
                 })
             }
         }

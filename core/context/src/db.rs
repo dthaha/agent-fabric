@@ -301,6 +301,8 @@ impl ContextStore {
             granted_at: Some(ms_to_timestamp(now)),
             expires_at: Some(ms_to_timestamp(now + ttl_ms)),
             state: LeaseState::Active as i32,
+            granted_by: String::new(),
+            preempted_by: String::new(),
         };
         self.insert_lease(&lease)?;
         self.conn.execute(
@@ -474,6 +476,8 @@ impl ContextStore {
                         granted_at: Some(ms_to_timestamp(row.get(5)?)),
                         expires_at: Some(ms_to_timestamp(row.get(6)?)),
                         state: row.get(7)?,
+                        granted_by: String::new(),
+                        preempted_by: String::new(),
                     })
                 },
             )
@@ -725,6 +729,8 @@ pub(crate) mod tests {
             granted_at: Some(ms_to_timestamp(now_ms())),
             expires_at: Some(ms_to_timestamp(now_ms() + 60_000)),
             state: LeaseState::Active as i32,
+            granted_by: String::new(),
+            preempted_by: String::new(),
         }
     }
 

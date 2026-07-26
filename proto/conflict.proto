@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package fabric.conflict;
+
+// Conflict-resolution contracts for the four-tier pipeline
+// (structural detector -> decoder -> mediator -> policy veto).
+// See docs/adr/002-conflict-resolution.md. Contracts only; detection unit is
+// the whole turn (prompt + tool calls + response).
+
+// Semantic relation between two turns on diverged branches, as classified by
+// the Tier 2 conflict decoder (classify-only sensor, never acts).
+enum ConflictRelation {
+  CONFLICT_RELATION_UNSPECIFIED = 0;
+  CONFLICT_RELATION_SUPERSEDES = 1;
+  CONFLICT_RELATION_CONTRADICTS = 2;
+  CONFLICT_RELATION_INDEPENDENT = 3;
+  CONFLICT_RELATION_AMBIGUOUS = 4;
+}
+
+// Resolution action selected by the Tier 3 mediator and approved or vetoed
+// by the Tier 4 policy gate.
+enum ConflictResolution {
+  CONFLICT_RESOLUTION_UNSPECIFIED = 0;
+  CONFLICT_RESOLUTION_LAST_WRITE_WINS = 1;
+  CONFLICT_RESOLUTION_COMPENSATE = 2;
+  CONFLICT_RESOLUTION_ESCALATE = 3;
+  CONFLICT_RESOLUTION_QUARANTINE = 4;
+  CONFLICT_RESOLUTION_ROLLBACK = 5;
+}
+
+// An entity two turns both touch (e.g. type="trip", id="denver-2026"). Used
+// by the decoder to explain WHY two turns are related.
+message SharedEntity {
+  string entity_type = 1;
+  string entity_id = 2;
+}
+
+// Tier 2 (conflict decoder) output. Classify-only: the sensor never acts;
+// downstream tiers decide what to do with the verdict.
+message ConflictVerdict {
+  string session_id = 1;
+  string entry_id_a = 2;
+  string entry_id_b = 3;
+  ConflictRelation relation = 4;
+  repeated SharedEntity shared_entities = 5;
+  float confidence = 6; // 0..1
+  string explanation = 7;
+}
+
+// A targeted question the Tier 3 mediator asks the user when it cannot
+// resolve a conflict on its own. Routed to the surface holding presence.
+message ClarifyingQuestion {
+  string question_text = 1;
+  repeated string options = 2; // empty = open-ended
+}
+
+// Tier 3 (conflict mediator) output. A proposal, never an action; the Tier 4
+// policy gate holds the veto. Set clarifying_question when the mediator
+// needs the user to disambiguate.
+message ResolutionProposal {
+  string session_id = 1;
+  ConflictRelation relation = 2;
+  string winning_entry_id = 3; // for SUPERSEDES
+  ConflictResolution proposed_resolution = 4;
+  float confidence = 5;
+  string rationale = 6;
+  ClarifyingQuestion clarifying_question = 7;
+}
+
+// Per-tool-category resolution strategy, wired into the Tier 4 policy gate
+// (deny-wins, fail-closed: default QUARANTINE).
+message ConflictPolicy {
+  // "financial", "filesystem", "config", "deployment", or "*" (org default).
+  string tool_category = 1;
+  ConflictResolution resolution = 2;
+  // Mediator confidence needed to auto-approve the proposal.
+  float auto_approve_threshold = 3;
+  // COMPENSATE/ROLLBACK only if the tool exposes compensate().
+  bool require_compensation_support = 4;
+  // When the primary resolution is not possible (e.g. no compensate()).
+  ConflictResolution fallback = 5;
+}
