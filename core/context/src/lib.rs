@@ -6,6 +6,7 @@
 pub mod clock;
 pub mod conflict;
 pub mod db;
+pub mod decoder;
 pub mod handoff;
 pub mod reconcile;
 pub mod store;
@@ -17,6 +18,10 @@ pub use conflict::{
     detect_in_region, detect_pair, StructuralConflict, StructuralDisposition, StructuralVerdict,
 };
 pub use db::{RollbackReport, SqliteContextStore, StoreError};
+pub use decoder::{
+    build_decoder_input, parse_verdict, ConflictDecoder, ContextTurn, DecoderError, DecoderInput,
+    StubDecoder, ToolCallView, OUTPUT_SCHEMA,
+};
 pub use handoff::{ack_handoff, catch_up, execute_handoff};
 pub use reconcile::{reconcile, ReconcileReport, SeqConflict};
 pub use store::ContextStore;
