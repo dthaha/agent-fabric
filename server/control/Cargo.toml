@@ -7,7 +7,13 @@ repository.workspace = true
 
 [dependencies]
 fabric-context = { path = "../../core/context" }
+fabric-types = { path = "../../core/types" }
+axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+pbjson-types.workspace = true
+tower = { version = "0.5", features = ["util"] }

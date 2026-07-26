@@ -5,6 +5,7 @@
 
 mod config;
 mod http;
+mod lease;
 mod state;
 
 use std::net::{Ipv4Addr, SocketAddr};
@@ -59,6 +60,11 @@ async fn main() -> Result<()> {
         let token = token.clone();
         async move { token.cancelled().await }
     }));
+
+    // Lease maintenance: renews server-granted leases before expiry and
+    // retries wanted (offline-failed) acquisitions, replaying the local
+    // op-log on reconnect. Advisory only — local work never waits on it.
+    tokio::spawn(lease::lease_maintenance(Arc::clone(&state), token.clone()));
 
     wait_for_shutdown_signal().await;
     info!("shutdown signal received, draining");

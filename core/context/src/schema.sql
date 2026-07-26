@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS leases (
     granted_at_ms INTEGER NOT NULL,
     expires_at_ms INTEGER NOT NULL,
     state         INTEGER NOT NULL,
+    granted_by    TEXT NOT NULL DEFAULT '',
+    preempted_by  TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 

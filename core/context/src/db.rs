@@ -63,7 +63,7 @@ pub struct RollbackReport {
     pub entries_removed: u64,
 }
 
-pub(crate) fn ms_to_timestamp(ms: i64) -> pbjson_types::Timestamp {
+pub fn ms_to_timestamp(ms: i64) -> pbjson_types::Timestamp {
     pbjson_types::Timestamp {
         seconds: ms.div_euclid(1000),
         nanos: (ms.rem_euclid(1000) * 1_000_000) as i32,
@@ -463,8 +463,8 @@ impl SqliteContextStore {
     pub(crate) fn insert_lease(&self, lease: &Lease) -> Result<()> {
         self.conn().execute(
             "INSERT INTO leases
-             (lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state, granted_by, preempted_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 lease.lease_id,
                 lease.session_id,
@@ -474,6 +474,8 @@ impl SqliteContextStore {
                 timestamp_to_ms(lease.granted_at.as_ref()),
                 timestamp_to_ms(lease.expires_at.as_ref()),
                 lease.state,
+                lease.granted_by,
+                lease.preempted_by,
             ],
         )?;
         Ok(())
@@ -482,7 +484,7 @@ impl SqliteContextStore {
     pub fn lease(&self, lease_id: &str) -> Result<Lease> {
         self.conn()
             .query_row(
-                "SELECT lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state
+                "SELECT lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state, granted_by, preempted_by
                  FROM leases WHERE lease_id = ?1",
                 params![lease_id],
                 |row| {
@@ -495,8 +497,8 @@ impl SqliteContextStore {
                         granted_at: Some(ms_to_timestamp(row.get(5)?)),
                         expires_at: Some(ms_to_timestamp(row.get(6)?)),
                         state: row.get(7)?,
-                        granted_by: String::new(),
-                        preempted_by: String::new(),
+                        granted_by: row.get(8)?,
+                        preempted_by: row.get(9)?,
                     })
                 },
             )
@@ -533,6 +535,59 @@ impl SqliteContextStore {
             return Err(StoreError::LeaseNotFound(lease_id.to_string()));
         }
         Ok(())
+    }
+
+    /// Record the lease authority that granted this lease. The server
+    /// control plane stamps its own identity here; client-supplied values
+    /// are never trusted.
+    pub fn set_granted_by(&self, lease_id: &str, granted_by: &str) -> Result<()> {
+        let n = self.conn().execute(
+            "UPDATE leases SET granted_by = ?1 WHERE lease_id = ?2",
+            params![granted_by, lease_id],
+        )?;
+        if n == 0 {
+            return Err(StoreError::LeaseNotFound(lease_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Record the surface whose presence preempted this lease, for audit.
+    pub fn set_preempted_by(&self, lease_id: &str, preempted_by: &str) -> Result<()> {
+        let n = self.conn().execute(
+            "UPDATE leases SET preempted_by = ?1 WHERE lease_id = ?2",
+            params![preempted_by, lease_id],
+        )?;
+        if n == 0 {
+            return Err(StoreError::LeaseNotFound(lease_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Renew an ACTIVE lease, extending its expiry to now + `ttl_ms` using
+    /// the local clock (the server clock when this store backs the control
+    /// plane). The holder must match; expired or non-active leases cannot
+    /// be renewed — acquire a fresh lease instead.
+    pub fn renew_lease(&self, lease_id: &str, holder_id: &str, ttl_ms: i64) -> Result<Lease> {
+        let lease = self.lease(lease_id)?;
+        if lease.holder_id != holder_id {
+            return Err(StoreError::NotLeaseHolder {
+                writer: holder_id.to_string(),
+                holder: lease.holder_id,
+            });
+        }
+        if lease.state != LeaseState::Active as i32 {
+            return Err(StoreError::LeaseNotActive(lease_id.to_string()));
+        }
+        let expires_ms = timestamp_to_ms(lease.expires_at.as_ref());
+        if expires_ms > 0 && now_ms() >= expires_ms {
+            return Err(StoreError::LeaseExpired(lease_id.to_string()));
+        }
+        let new_expires = now_ms() + ttl_ms;
+        self.conn().execute(
+            "UPDATE leases SET expires_at_ms = ?1 WHERE lease_id = ?2",
+            params![new_expires, lease_id],
+        )?;
+        self.lease(lease_id)
     }
 
     /// Set the granted_seq of an existing lease. Used by handoff to pin the
@@ -703,6 +758,19 @@ fn migrate(conn: &Connection) -> Result<()> {
             "ALTER TABLE sessions ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
             [],
         )?;
+    }
+    for column in ["granted_by", "preempted_by"] {
+        let exists: bool = conn
+            .prepare(&format!(
+                "SELECT 1 FROM pragma_table_info('leases') WHERE name = '{column}'"
+            ))?
+            .exists([])?;
+        if !exists {
+            conn.execute(
+                &format!("ALTER TABLE leases ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"),
+                [],
+            )?;
+        }
     }
     Ok(())
 }
@@ -1284,5 +1352,93 @@ pub(crate) mod tests {
         // Nothing removed, lease still active.
         assert_eq!(store.head_seq("s1").unwrap(), 1);
         assert!(store.active_lease("s1").unwrap().is_some());
+    }
+
+    #[test]
+    fn renew_lease_extends_expiry_for_holder() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        let lease = store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+        let before = timestamp_to_ms(lease.expires_at.as_ref());
+
+        let renewed = store
+            .renew_lease(&lease.lease_id, "endpoint-1", 60_000)
+            .unwrap();
+        let after = timestamp_to_ms(renewed.expires_at.as_ref());
+        assert!(
+            after > before,
+            "renewal must extend expiry: {before} -> {after}"
+        );
+        assert_eq!(renewed.state, LeaseState::Active as i32);
+        assert_eq!(renewed.holder_id, "endpoint-1");
+        // Persisted: re-reading from the store sees the new expiry.
+        let reread = store.lease(&lease.lease_id).unwrap();
+        assert_eq!(timestamp_to_ms(reread.expires_at.as_ref()), after);
+    }
+
+    #[test]
+    fn renew_lease_rejects_non_holder_and_non_active() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        let lease = store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+
+        let err = store
+            .renew_lease(&lease.lease_id, "mallory", 60_000)
+            .unwrap_err();
+        assert!(matches!(err, StoreError::NotLeaseHolder { .. }));
+
+        store.release_lease("s1", "endpoint-1").unwrap();
+        let err = store
+            .renew_lease(&lease.lease_id, "endpoint-1", 60_000)
+            .unwrap_err();
+        assert!(matches!(err, StoreError::LeaseNotActive(_)));
+
+        assert!(matches!(
+            store.renew_lease("nope", "endpoint-1", 60_000),
+            Err(StoreError::LeaseNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn renew_lease_rejects_expired() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        // TTL 0 expires immediately.
+        let lease = store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 0)
+            .unwrap();
+        let err = store
+            .renew_lease(&lease.lease_id, "endpoint-1", 60_000)
+            .unwrap_err();
+        assert!(matches!(err, StoreError::LeaseExpired(_)));
+    }
+
+    #[test]
+    fn lease_attribution_roundtrips() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        let lease = store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+        assert_eq!(lease.granted_by, "");
+        assert_eq!(lease.preempted_by, "");
+
+        store
+            .set_granted_by(&lease.lease_id, "fabric-server")
+            .unwrap();
+        store.set_preempted_by(&lease.lease_id, "web-1").unwrap();
+
+        let reread = store.lease(&lease.lease_id).unwrap();
+        assert_eq!(reread.granted_by, "fabric-server");
+        assert_eq!(reread.preempted_by, "web-1");
+
+        assert!(matches!(
+            store.set_granted_by("nope", "x"),
+            Err(StoreError::LeaseNotFound(_))
+        ));
     }
 }

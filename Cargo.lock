@@ -458,10 +458,14 @@ dependencies = [
 name = "fabric-control"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "fabric-context",
+ "fabric-types",
+ "pbjson-types",
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tracing",
 ]
 
@@ -482,11 +486,13 @@ dependencies = [
  "axum",
  "fabric-classifier",
  "fabric-context",
+ "fabric-control",
  "fabric-endpoint-mdm",
  "fabric-policy",
  "fabric-telemetry",
  "fabric-types",
  "pbjson-types",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

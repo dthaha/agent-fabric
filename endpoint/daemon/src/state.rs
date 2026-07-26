@@ -1,5 +1,6 @@
 //! Shared daemon state, handed to every HTTP handler.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
@@ -7,6 +8,7 @@ use fabric_context::SqliteContextStore;
 use fabric_policy::PolicyStore;
 
 use crate::config::DaemonConfig;
+use crate::lease::{CachedLease, LeaseClient};
 
 /// State shared between the main loop and the localhost HTTP server. The
 /// context store and policy store sit behind locks; critical sections are
@@ -16,15 +18,28 @@ pub struct DaemonState {
     pub started: Instant,
     pub store: Mutex<SqliteContextStore>,
     pub policy: RwLock<PolicyStore>,
+    /// Client of the server-side lease authority. `None` when no server URL
+    /// is configured (offline-only). Local op-log work never depends on it.
+    pub lease_client: Option<LeaseClient>,
+    /// Server-granted lease cache, keyed by session id. Advisory only: the
+    /// local op-log commits real turns with or without a server lease.
+    pub leases: Mutex<HashMap<String, CachedLease>>,
 }
 
 impl DaemonState {
     pub fn new(cfg: DaemonConfig, store: SqliteContextStore) -> Arc<Self> {
+        let lease_client = if cfg.server_url.is_empty() {
+            None
+        } else {
+            Some(LeaseClient::new(&cfg.server_url, &cfg.device_id))
+        };
         Arc::new(Self {
             cfg,
             started: Instant::now(),
             store: Mutex::new(store),
             policy: RwLock::new(PolicyStore::new()),
+            lease_client,
+            leases: Mutex::new(HashMap::new()),
         })
     }
 

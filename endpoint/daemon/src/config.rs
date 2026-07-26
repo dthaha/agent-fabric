@@ -45,19 +45,25 @@ impl Default for DaemonConfig {
 impl DaemonConfig {
     /// Load config from `FABRIC_CONFIG` (path to JSON), falling back to
     /// `./fabric-endpoint.json` if present, then to defaults.
+    /// `FABRIC_SERVER_URL` overrides the configured server base URL.
     pub fn load() -> Result<Self> {
         let path = std::env::var("FABRIC_CONFIG")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("fabric-endpoint.json"));
-        if !path.exists() {
+        let mut cfg = if !path.exists() {
             info!(?path, "no config file found, using defaults");
-            return Ok(Self::default());
+            Self::default()
+        } else {
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading config {}", path.display()))?;
+            let cfg: Self = serde_json::from_str(&raw)
+                .with_context(|| format!("parsing config {}", path.display()))?;
+            info!(?path, "loaded daemon config");
+            cfg
+        };
+        if let Ok(url) = std::env::var("FABRIC_SERVER_URL") {
+            cfg.server_url = url;
         }
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading config {}", path.display()))?;
-        let cfg: Self = serde_json::from_str(&raw)
-            .with_context(|| format!("parsing config {}", path.display()))?;
-        info!(?path, "loaded daemon config");
         Ok(cfg)
     }
 }
