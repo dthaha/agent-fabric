@@ -1,0 +1,37 @@
+{
+  "name": "contradicts_compensate_door",
+  "expected": {"kind": "resolution", "resolution": "COMPENSATE", "winning_entry_id": "e-7c14"},
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {"entity_type": "tool", "entity_id": "lock_door"},
+        {"entity_type": "target", "entity_id": "home:front-door"}
+      ],
+      "confidence": 0.88,
+      "explanation": "lock and unlock from two surfaces cannot both be honored"
+    },
+    "session_id": "s-home-2",
+    "entry_id_a": "e-7c10",
+    "entry_id_b": "e-7c14",
+    "call_a": {
+      "tool_name": "lock_door",
+      "target": "home:front-door",
+      "params": {"locked": "true"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "lock_door",
+      "target": "home:front-door",
+      "params": {"locked": "false"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-40", "seq": 40, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "heading out, lock the front door"},
+      {"entry_id": "a-41", "seq": 41, "kind": "ENTRY_KIND_ASSISTANT_MESSAGE", "content": "front door locked"},
+      {"entry_id": "u-42", "seq": 42, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "(surface: partner-phone) I'm at the door, unlock it"},
+      {"entry_id": "u-43", "seq": 43, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "that's my partner, let them in"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"CONTRADICTS\",\"winning_entry_id\":\"e-7c14\",\"proposed_resolution\":\"COMPENSATE\",\"confidence\":0.85,\"rationale\":\"The user's follow-up 'that's my partner, let them in' confirms the unlock is the intended intent, so the earlier lock should be undone.\",\"clarifying_question\":null}"
+}

@@ -1,0 +1,36 @@
+{
+  "name": "supersedes_lww_flight",
+  "expected": {"kind": "resolution", "resolution": "LAST_WRITE_WINS", "winning_entry_id": "e-6d29"},
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {"entity_type": "tool", "entity_id": "book_flight"},
+        {"entity_type": "target", "entity_id": "trip:denver-2026-03"}
+      ],
+      "confidence": 0.96,
+      "explanation": "the 2pm booking is a revision of the same trip"
+    },
+    "session_id": "s-trip-1",
+    "entry_id_a": "e-6d20",
+    "entry_id_b": "e-6d29",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:denver-2026-03",
+      "params": {"departure": "09:00", "date": "2026-03-01"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:denver-2026-03",
+      "params": {"departure": "14:00", "date": "2026-03-01"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-31", "seq": 31, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "book the 9am flight to denver"},
+      {"entry_id": "a-32", "seq": 32, "kind": "ENTRY_KIND_ASSISTANT_MESSAGE", "content": "booked, confirmation DL-4410"},
+      {"entry_id": "u-33", "seq": 33, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "my meeting moved — actually get me on the 2pm one instead"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"SUPERSEDES\",\"winning_entry_id\":\"e-6d29\",\"proposed_resolution\":\"LAST_WRITE_WINS\",\"confidence\":0.95,\"rationale\":\"The user's 'instead' makes the 2pm booking a clean revision of the 9am one, so the newer entry stands.\",\"clarifying_question\":null}"
+}

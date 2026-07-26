@@ -161,7 +161,7 @@ impl DecoderInput {
     }
 }
 
-fn render_call(call: &ToolCallView) -> String {
+pub(crate) fn render_call(call: &ToolCallView) -> String {
     let params = serde_json::to_string(&call.params).unwrap_or_else(|_| "{}".into());
     let mut s = format!(
         "tool: {}\ntarget: {}\nparams: {}",

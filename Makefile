@@ -1,4 +1,4 @@
-.PHONY: proto endpoint endpoint-cross server test check eval-decoder
+.PHONY: proto endpoint endpoint-cross server test check eval-decoder eval-mediator
 
 proto:
 	buf generate
@@ -32,3 +32,10 @@ check:
 # needs auth). Not run in CI — the DRY eval runs in `make test` instead.
 eval-decoder:
 	cargo test -p fabric-context --test decoder_eval live -- --ignored --nocapture
+
+# Live conflict-mediator eval against a real endpoint. Opt-in; requires
+# OPENAI_BASE_URL (FABRIC_MEDIATOR_MODEL optional, falls back to
+# FABRIC_DECODER_MODEL or a default; OPENAI_API_KEY if the endpoint needs
+# auth). Not run in CI — the DRY eval runs in `make test` instead.
+eval-mediator:
+	cargo test -p fabric-context --test mediator_eval live -- --ignored --nocapture

@@ -1,0 +1,34 @@
+{
+  "name": "ambiguous_question_billing",
+  "expected": {"kind": "question"},
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {"entity_type": "tool", "entity_id": "set_config"},
+        {"entity_type": "target", "entity_id": "service:billing"}
+      ],
+      "confidence": 0.4,
+      "explanation": "no context to tell whether the mode flip is a revision or a disagreement"
+    },
+    "session_id": "s-ops-4",
+    "entry_id_a": "e-4b77",
+    "entry_id_b": "e-4b81",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:billing",
+      "params": {"mode": "live"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:billing",
+      "params": {"mode": "test"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-05", "seq": 5, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "we're seeing elevated errors in billing"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"AMBIGUOUS\",\"winning_entry_id\":\"\",\"proposed_resolution\":\"ESCALATE\",\"confidence\":0.3,\"rationale\":\"One branch set billing to live, the other to test, and the only context is an error report — either could be the intended remediation or a dangerous mistake. The single fact that resolves this is which mode the user wanted during the incident.\",\"clarifying_question\":{\"question_text\":\"During the billing incident, did you intend the service to be in live mode or in test mode?\",\"options\":[\"live\",\"test\"]}}"
+}

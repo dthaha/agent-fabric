@@ -1,0 +1,35 @@
+{
+  "name": "boundary_low_conf_supersedes_question",
+  "expected": {"kind": "question"},
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {"entity_type": "tool", "entity_id": "send_email"},
+        {"entity_type": "target", "entity_id": "contact:team@corp.example"}
+      ],
+      "confidence": 0.55,
+      "explanation": "second email may be a corrected draft or a separate announcement"
+    },
+    "session_id": "s-mail-6",
+    "entry_id_a": "e-1a10",
+    "entry_id_b": "e-1a31",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:team@corp.example",
+      "params": {"subject": "launch moved to Friday", "body": "see you then"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:team@corp.example",
+      "params": {"subject": "launch moved to Monday", "body": "see you then"},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-02", "seq": 2, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "tell the team the launch moved to Friday"},
+      {"entry_id": "u-07", "seq": 7, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "(surface: phone, offline) the venue fell through, more soon"}
+    ]
+  },
+  "golden_output": "{\"relation\":\"SUPERSEDES\",\"winning_entry_id\":\"\",\"proposed_resolution\":\"ESCALATE\",\"confidence\":0.4,\"rationale\":\"The decoder leans SUPERSEDES, but the only new information is that the venue fell through — Monday could be a correction of Friday, or the start of a separate 'postponed indefinitely' message. The answer that flips this is whether Monday replaces Friday.\",\"clarifying_question\":{\"question_text\":\"Should the team be told the launch is on Monday instead of Friday, or are Friday and Monday two separate updates?\",\"options\":[\"Monday replaces Friday\",\"Two separate updates\"]}}"
+}

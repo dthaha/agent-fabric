@@ -1,0 +1,35 @@
+{
+  "name": "contradicts_question_trip",
+  "expected": {"kind": "question"},
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {"entity_type": "target", "entity_id": "trip:denver-2026-03"}
+      ],
+      "confidence": 0.72,
+      "explanation": "book vs cancel the same trip"
+    },
+    "session_id": "s-trip-3",
+    "entry_id_a": "e-3a01",
+    "entry_id_b": "e-3a55",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:denver-2026-03",
+      "params": {"date": "2026-03-01"},
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "cancel_trip",
+      "target": "trip:denver-2026-03",
+      "params": {},
+      "idempotency_key": ""
+    },
+    "context": [
+      {"entry_id": "u-10", "seq": 10, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "book me a flight to denver for the offsite"},
+      {"entry_id": "a-11", "seq": 11, "kind": "ENTRY_KIND_ASSISTANT_MESSAGE", "content": "booked, confirmation DL-4410"},
+      {"entry_id": "u-12", "seq": 12, "kind": "ENTRY_KIND_USER_MESSAGE", "content": "(surface: laptop, offline 6h) the offsite might move, hold off on travel stuff"}
+    ]
+  },
+  "golden_output": "Looking at both branches: A booked the flight; B cancelled it after an offline note that the offsite 'might' move. 'Might' is not a clear authorization to cancel, but the cancel may have been deliberate. I cannot resolve this without asking.\n\n```json\n{\"relation\":\"CONTRADICTS\",\"winning_entry_id\":\"\",\"proposed_resolution\":\"ESCALATE\",\"confidence\":0.45,\"rationale\":\"Branch A booked the flight; branch B cancelled it after an offline note that the offsite 'might' move — 'might' does not clearly authorize a cancellation, but cancelling may have been deliberate. I cannot tell whether the cancel supersedes the booking or was provisional.\",\"clarifying_question\":{\"question_text\":\"Did you mean to cancel the Denver trip entirely, or just pause further travel changes until the offsite dates are confirmed?\",\"options\":[\"Cancel the trip entirely\",\"Keep the booking, just pause further changes\"]}}\n```\n\nThat is my proposal."
+}
