@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         "fabric-endpoint starting"
     );
 
-    let store = fabric_context::ContextStore::open(&cfg.context_db)
+    let store = fabric_context::SqliteContextStore::open(&cfg.context_db)
         .with_context(|| format!("opening context store {}", cfg.context_db.display()))?;
     info!("context store ready (WAL mode)");
 

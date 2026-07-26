@@ -172,7 +172,7 @@ mod tests {
     use crate::config::DaemonConfig;
 
     fn test_state() -> Arc<DaemonState> {
-        let store = fabric_context::ContextStore::open_in_memory().unwrap();
+        let store = fabric_context::SqliteContextStore::open_in_memory().unwrap();
         DaemonState::new(DaemonConfig::default(), store)
     }
 

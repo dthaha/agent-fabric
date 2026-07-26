@@ -7,10 +7,12 @@ repository.workspace = true
 
 [dependencies]
 fabric-types = { path = "../types" }
+async-trait.workspace = true
 pbjson-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rusqlite.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 uuid.workspace = true
 tracing.workspace = true

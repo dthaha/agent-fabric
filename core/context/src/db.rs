@@ -2,6 +2,8 @@
 //! context op-log, and write leases. Lease enforcement happens here — an
 //! entry can only be appended by the holder of the session's ACTIVE lease.
 
+use std::sync::{Arc, Mutex, MutexGuard};
+
 use rusqlite::{params, Connection, OptionalExtension};
 use thiserror::Error;
 use tracing::instrument;
@@ -44,11 +46,13 @@ pub enum StoreError {
     },
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("blocking store task failed to join: {0}")]
+    Join(#[from] tokio::task::JoinError),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-/// Outcome of [`ContextStore::release_with_rollback`]: the op-log was
+/// Outcome of [`SqliteContextStore::release_with_rollback`]: the op-log was
 /// truncated back to the last completed flow boundary.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RollbackReport {
@@ -71,14 +75,18 @@ pub(crate) fn timestamp_to_ms(ts: Option<&pbjson_types::Timestamp>) -> i64 {
         .unwrap_or(0)
 }
 
-/// The context store. Wraps a single SQLite connection; mutating operations
-/// that must be atomic take `&mut self` and run inside a transaction.
-pub struct ContextStore {
-    conn: Connection,
-    clock: MonotonicClock,
+/// The SQLite-backed context store. Wraps a single SQLite connection behind
+/// a mutex so the store is `Send + Sync` and cheap to clone into blocking
+/// tasks (the async [`crate::store::ContextStore`] impl runs calls via
+/// `spawn_blocking`). Mutating operations that must be atomic take `&mut
+/// self`-adjacent locks on the one connection and run inside a transaction.
+#[derive(Clone)]
+pub struct SqliteContextStore {
+    conn: Arc<Mutex<Connection>>,
+    clock: Arc<MonotonicClock>,
 }
 
-impl ContextStore {
+impl SqliteContextStore {
     /// Open (or create) a store at `path` and run migrations.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
         Self::init(Connection::open(path)?)
@@ -95,9 +103,15 @@ impl ContextStore {
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
         Ok(Self {
-            conn,
-            clock: MonotonicClock::new(),
+            conn: Arc::new(Mutex::new(conn)),
+            clock: Arc::new(MonotonicClock::new()),
         })
+    }
+
+    /// Lock the underlying connection. Never hold the guard across a call
+    /// to another store method: every method takes the lock itself.
+    fn conn(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().expect("context store mutex poisoned")
     }
 
     /// Flush the WAL and close the store. Called on daemon shutdown so no
@@ -105,7 +119,7 @@ impl ContextStore {
     /// `close` is also safe (SQLite checkpoints on last close), but this
     /// makes the flush explicit and surfaces errors.
     pub fn close(self) -> Result<()> {
-        self.conn
+        self.conn()
             .pragma_update(None, "wal_checkpoint", "TRUNCATE")?;
         Ok(())
     }
@@ -114,13 +128,13 @@ impl ContextStore {
 
     /// Lightweight liveness check for health/readiness probes.
     pub fn ping(&self) -> Result<()> {
-        self.conn.query_row("SELECT 1", [], |_| Ok(()))?;
+        self.conn().query_row("SELECT 1", [], |_| Ok(()))?;
         Ok(())
     }
 
     /// Number of sessions in the ACTIVE state.
     pub fn active_session_count(&self) -> Result<u64> {
-        let n: i64 = self.conn.query_row(
+        let n: i64 = self.conn().query_row(
             "SELECT COUNT(*) FROM sessions WHERE state = ?1",
             params![SessionState::Active as i32],
             |row| row.get(0),
@@ -131,7 +145,8 @@ impl ContextStore {
     /// All sessions in the ACTIVE state, oldest first. Powers the daemon's
     /// admin endpoints.
     pub fn list_active_sessions(&self) -> Result<Vec<SessionMeta>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
             "SELECT session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels, org_id
              FROM sessions WHERE state = ?1 ORDER BY created_at_ms ASC",
         )?;
@@ -160,7 +175,7 @@ impl ContextStore {
     /// no-op so offline replicas can converge.
     pub fn create_session(&self, meta: &SessionMeta) -> Result<()> {
         let labels = serde_json::to_string(&meta.labels)?;
-        self.conn.execute(
+        self.conn().execute(
             "INSERT OR IGNORE INTO sessions
              (session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels, org_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -180,7 +195,7 @@ impl ContextStore {
     }
 
     pub fn session(&self, session_id: &str) -> Result<SessionMeta> {
-        self.conn
+        self.conn()
             .query_row(
                 "SELECT session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels, org_id
                  FROM sessions WHERE session_id = ?1",
@@ -205,12 +220,12 @@ impl ContextStore {
     }
 
     /// Raw state setter. Crate-internal: callers outside this module must
-    /// use the validated transitions ([`ContextStore::suspend`],
-    /// [`ContextStore::resume`], [`ContextStore::complete`],
-    /// [`ContextStore::archive`]). Handoff uses this to set HANDED_OFF and
+    /// use the validated transitions ([`SqliteContextStore::suspend`],
+    /// [`SqliteContextStore::resume`], [`SqliteContextStore::complete`],
+    /// [`SqliteContextStore::archive`]). Handoff uses this to set HANDED_OFF and
     /// to return to ACTIVE on ack.
     pub(crate) fn set_session_state(&self, session_id: &str, state: i32) -> Result<()> {
-        let n = self.conn.execute(
+        let n = self.conn().execute(
             "UPDATE sessions SET state = ?1, last_activity_ms = ?2 WHERE session_id = ?3",
             params![state, now_ms(), session_id],
         )?;
@@ -266,7 +281,7 @@ impl ContextStore {
     // ---- leases ----
 
     /// Acquire a turn-scoped write lease. Called at the START of an agent
-    /// turn; the holder must call [`ContextStore::release_lease`] when the
+    /// turn; the holder must call [`SqliteContextStore::release_lease`] when the
     /// turn completes. `ttl_ms` is a safety net only: if the holder crashes
     /// without releasing, the lease auto-expires after the TTL and a new
     /// holder may acquire it.
@@ -305,7 +320,7 @@ impl ContextStore {
             preempted_by: String::new(),
         };
         self.insert_lease(&lease)?;
-        self.conn.execute(
+        self.conn().execute(
             "UPDATE sessions SET active_lease = ?1, last_activity_ms = ?2 WHERE session_id = ?3",
             params![lease.lease_id, now, session_id],
         )?;
@@ -326,7 +341,7 @@ impl ContextStore {
             });
         }
         self.set_lease_state(&lease.lease_id, LeaseState::Released)?;
-        self.conn.execute(
+        self.conn().execute(
             "UPDATE sessions SET active_lease = '', last_activity_ms = ?1 WHERE session_id = ?2",
             params![now_ms(), session_id],
         )?;
@@ -343,7 +358,7 @@ impl ContextStore {
     ///
     /// Requires the caller to hold the active lease. Marks the lease
     /// RELEASED and clears the session's active lease. For normal turn
-    /// completion (nothing to discard) use [`ContextStore::release_lease`].
+    /// completion (nothing to discard) use [`SqliteContextStore::release_lease`].
     pub fn release_with_rollback(
         &self,
         session_id: &str,
@@ -358,18 +373,18 @@ impl ContextStore {
                 holder: lease.holder_id,
             });
         }
-        let boundary: i64 = self.conn.query_row(
+        let boundary: i64 = self.conn().query_row(
             "SELECT COALESCE(MAX(seq), 0) FROM context_entries
                  WHERE session_id = ?1 AND kind = ?2",
             params![session_id, EntryKind::AssistantMessage as i32],
             |row| row.get(0),
         )?;
-        let removed = self.conn.execute(
+        let removed = self.conn().execute(
             "DELETE FROM context_entries WHERE session_id = ?1 AND seq > ?2",
             params![session_id, boundary],
         )?;
         self.set_lease_state(&lease.lease_id, LeaseState::Released)?;
-        self.conn.execute(
+        self.conn().execute(
             "UPDATE sessions SET active_lease = '', last_activity_ms = ?1 WHERE session_id = ?2",
             params![now_ms(), session_id],
         )?;
@@ -389,7 +404,7 @@ impl ContextStore {
             .active_lease(session_id)?
             .ok_or_else(|| StoreError::NoActiveLease(session_id.to_string()))?;
         self.set_lease_state(&lease.lease_id, LeaseState::Revoked)?;
-        self.conn.execute(
+        self.conn().execute(
             "UPDATE sessions SET active_lease = '', last_activity_ms = ?1 WHERE session_id = ?2",
             params![now_ms(), session_id],
         )?;
@@ -414,12 +429,16 @@ impl ContextStore {
     /// Revoke every active lease on sessions owned by `org_id`. Org-scoped
     /// kill-switch for enterprise admin. Returns the revoked leases.
     pub fn revoke_all(&self, org_id: &str) -> Result<Vec<Lease>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT session_id FROM sessions WHERE org_id = ?1 AND active_lease != ''")?;
-        let session_ids = stmt
-            .query_map(params![org_id], |row| row.get::<_, String>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let session_ids = {
+            let conn = self.conn();
+            let mut stmt = conn.prepare(
+                "SELECT session_id FROM sessions WHERE org_id = ?1 AND active_lease != ''",
+            )?;
+            let ids = stmt
+                .query_map(params![org_id], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            ids
+        };
         let mut revoked = Vec::with_capacity(session_ids.len());
         for session_id in session_ids {
             revoked.push(self.revoke_lease(&session_id, "org-wide lease revocation")?);
@@ -434,7 +453,7 @@ impl ContextStore {
             return Err(StoreError::LeaseConflict(lease.session_id.clone()));
         }
         self.insert_lease(lease)?;
-        self.conn.execute(
+        self.conn().execute(
             "UPDATE sessions SET active_lease = ?1, last_activity_ms = ?2 WHERE session_id = ?3",
             params![lease.lease_id, now_ms(), lease.session_id],
         )?;
@@ -442,7 +461,7 @@ impl ContextStore {
     }
 
     pub(crate) fn insert_lease(&self, lease: &Lease) -> Result<()> {
-        self.conn.execute(
+        self.conn().execute(
             "INSERT INTO leases
              (lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -461,7 +480,7 @@ impl ContextStore {
     }
 
     pub fn lease(&self, lease_id: &str) -> Result<Lease> {
-        self.conn
+        self.conn()
             .query_row(
                 "SELECT lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state
                  FROM leases WHERE lease_id = ?1",
@@ -489,15 +508,16 @@ impl ContextStore {
     /// not yet been superseded (an expired lease blocks new writers until a
     /// handoff or re-grant occurs).
     pub fn active_lease(&self, session_id: &str) -> Result<Option<Lease>> {
-        let id: Option<String> = self
-            .conn
-            .query_row(
+        let id: Option<String> = {
+            let conn = self.conn();
+            conn.query_row(
                 "SELECT lease_id FROM leases WHERE session_id = ?1 AND state = ?2
                  ORDER BY granted_at_ms DESC LIMIT 1",
                 params![session_id, LeaseState::Active as i32],
                 |row| row.get(0),
             )
-            .optional()?;
+            .optional()?
+        };
         match id {
             Some(id) => Ok(Some(self.lease(&id)?)),
             None => Ok(None),
@@ -505,7 +525,7 @@ impl ContextStore {
     }
 
     pub(crate) fn set_lease_state(&self, lease_id: &str, state: LeaseState) -> Result<()> {
-        let n = self.conn.execute(
+        let n = self.conn().execute(
             "UPDATE leases SET state = ?1 WHERE lease_id = ?2",
             params![state as i32, lease_id],
         )?;
@@ -518,7 +538,7 @@ impl ContextStore {
     /// Set the granted_seq of an existing lease. Used by handoff to pin the
     /// new holder's lease to the freeze point.
     pub(crate) fn set_granted_seq(&self, lease_id: &str, granted_seq: u64) -> Result<()> {
-        let n = self.conn.execute(
+        let n = self.conn().execute(
             "UPDATE leases SET granted_seq = ?1 WHERE lease_id = ?2",
             params![granted_seq as i64, lease_id],
         )?;
@@ -567,7 +587,7 @@ impl ContextStore {
             entry.created_at = Some(ms_to_timestamp(self.clock.tick()));
         }
         self.insert_entry_raw(entry)?;
-        self.conn.execute(
+        self.conn().execute(
             "UPDATE sessions SET last_activity_ms = ?1 WHERE session_id = ?2",
             params![now_ms(), entry.session_id],
         )?;
@@ -577,9 +597,9 @@ impl ContextStore {
     /// Insert an entry as-is, bypassing lease checks. Used by reconcile and
     /// by replication catch-up, where entries were already validated by the
     /// writer's locus. Crate-internal: external writers must use
-    /// [`ContextStore::append_entry`] so the lease is always enforced.
+    /// [`SqliteContextStore::append_entry`] so the lease is always enforced.
     pub(crate) fn insert_entry_raw(&self, entry: &ContextEntry) -> Result<()> {
-        self.conn.execute(
+        self.conn().execute(
             "INSERT INTO context_entries
              (session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -599,7 +619,7 @@ impl ContextStore {
     }
 
     pub fn entry_by_id(&self, entry_id: &str) -> Result<Option<ContextEntry>> {
-        self.conn
+        self.conn()
             .query_row(
                 "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms
                  FROM context_entries WHERE entry_id = ?1",
@@ -611,7 +631,7 @@ impl ContextStore {
     }
 
     pub fn entry_at_seq(&self, session_id: &str, seq: u64) -> Result<Option<ContextEntry>> {
-        self.conn
+        self.conn()
             .query_row(
                 "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms
                  FROM context_entries WHERE session_id = ?1 AND seq = ?2",
@@ -625,7 +645,8 @@ impl ContextStore {
     /// All entries with seq > `after_seq`, in order. Used for handoff
     /// catch-up and reconcile.
     pub fn entries_since(&self, session_id: &str, after_seq: u64) -> Result<Vec<ContextEntry>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
             "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms
              FROM context_entries WHERE session_id = ?1 AND seq > ?2 ORDER BY seq ASC",
         )?;
@@ -639,7 +660,7 @@ impl ContextStore {
 
     pub fn head_seq(&self, session_id: &str) -> Result<u64> {
         let seq: Option<i64> = self
-            .conn
+            .conn()
             .query_row(
                 "SELECT MAX(seq) FROM context_entries WHERE session_id = ?1",
                 params![session_id],
@@ -653,7 +674,7 @@ impl ContextStore {
     /// Reassign the seq of an existing entry (conflict resolution moves the
     /// loser to the tail of the log).
     pub(crate) fn reassign_seq(&self, entry_id: &str, new_seq: u64) -> Result<()> {
-        let n = self.conn.execute(
+        let n = self.conn().execute(
             "UPDATE context_entries SET seq = ?1 WHERE entry_id = ?2",
             params![new_seq as i64, entry_id],
         )?;
@@ -754,19 +775,19 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("ctx.db");
 
-        let store = ContextStore::open(&path).unwrap();
+        let store = SqliteContextStore::open(&path).unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store.close().unwrap();
 
         // WAL was truncated on close; data survived in the main db file.
-        let store = ContextStore::open(&path).unwrap();
+        let store = SqliteContextStore::open(&path).unwrap();
         assert_eq!(store.session("s1").unwrap().session_id, "s1");
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn ping_and_active_session_count() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.ping().unwrap();
         assert_eq!(store.active_session_count().unwrap(), 0);
 
@@ -780,7 +801,7 @@ pub(crate) mod tests {
 
     #[test]
     fn list_active_sessions_returns_only_active() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         assert!(store.list_active_sessions().unwrap().is_empty());
 
         store.create_session(&test_session("s1")).unwrap();
@@ -795,7 +816,7 @@ pub(crate) mod tests {
 
     #[test]
     fn acquire_append_release_cycle() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
 
         // Turn 1: acquire, append, release.
@@ -833,7 +854,7 @@ pub(crate) mod tests {
 
     #[test]
     fn acquire_during_active_lease_conflicts() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -846,7 +867,7 @@ pub(crate) mod tests {
 
     #[test]
     fn acquire_after_holder_crash_succeeds_once_expired() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         // Holder crashes mid-turn without releasing; TTL is the safety net.
         let crashed = store
@@ -867,7 +888,7 @@ pub(crate) mod tests {
 
     #[test]
     fn release_rejects_non_holder() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -886,7 +907,7 @@ pub(crate) mod tests {
             SessionState::Archived,
             SessionState::Suspended,
         ] {
-            let store = ContextStore::open_in_memory().unwrap();
+            let store = SqliteContextStore::open_in_memory().unwrap();
             store.create_session(&test_session("s1")).unwrap();
             store
                 .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -905,7 +926,7 @@ pub(crate) mod tests {
 
     #[test]
     fn release_keeps_session_active_without_writer() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -922,7 +943,7 @@ pub(crate) mod tests {
 
     #[test]
     fn revoke_lease_blocks_appends_and_logs_event() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         let lease = store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -962,7 +983,7 @@ pub(crate) mod tests {
 
     #[test]
     fn revoke_all_revokes_every_active_lease_in_org() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         for (sid, org) in [("s1", "org-1"), ("s2", "org-1"), ("s3", "org-2")] {
             let mut meta = test_session(sid);
             meta.org_id = org.into();
@@ -986,7 +1007,7 @@ pub(crate) mod tests {
 
     #[test]
     fn lifecycle_happy_path() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
 
         store.suspend("s1").unwrap();
@@ -1013,7 +1034,7 @@ pub(crate) mod tests {
 
     #[test]
     fn lifecycle_rejects_invalid_transitions() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
 
         // Cannot resume an ACTIVE session.
@@ -1048,7 +1069,7 @@ pub(crate) mod tests {
 
     #[test]
     fn complete_requires_no_active_lease() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -1066,7 +1087,7 @@ pub(crate) mod tests {
 
     #[test]
     fn append_assigns_monotonic_seq() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .grant_lease(&test_lease("l1", "s1", "endpoint-1"))
@@ -1081,7 +1102,7 @@ pub(crate) mod tests {
 
     #[test]
     fn append_rejects_non_holder() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .grant_lease(&test_lease("l1", "s1", "endpoint-1"))
@@ -1095,7 +1116,7 @@ pub(crate) mod tests {
 
     #[test]
     fn append_rejects_expired_lease() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         let mut lease = test_lease("l1", "s1", "endpoint-1");
         lease.expires_at = Some(ms_to_timestamp(now_ms() - 1));
@@ -1108,7 +1129,7 @@ pub(crate) mod tests {
 
     #[test]
     fn single_active_lease_enforced() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .grant_lease(&test_lease("l1", "s1", "endpoint-1"))
@@ -1121,7 +1142,7 @@ pub(crate) mod tests {
 
     #[test]
     fn entries_since_returns_ordered_tail() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .grant_lease(&test_lease("l1", "s1", "endpoint-1"))
@@ -1136,7 +1157,12 @@ pub(crate) mod tests {
         assert_eq!(tail[1].entry_id, "e5");
     }
 
-    fn append_kinds(store: &ContextStore, session_id: &str, holder: &str, kinds: &[EntryKind]) {
+    fn append_kinds(
+        store: &SqliteContextStore,
+        session_id: &str,
+        holder: &str,
+        kinds: &[EntryKind],
+    ) {
         for (i, kind) in kinds.iter().enumerate() {
             let mut e = test_entry(&format!("e{i}"), session_id, holder);
             e.kind = *kind as i32;
@@ -1146,7 +1172,7 @@ pub(crate) mod tests {
 
     #[test]
     fn release_with_rollback_discards_partial_turn() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -1186,7 +1212,7 @@ pub(crate) mod tests {
 
     #[test]
     fn release_with_rollback_preserves_completed_flows() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -1226,7 +1252,7 @@ pub(crate) mod tests {
 
     #[test]
     fn release_lease_keeps_partial_entries() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
@@ -1246,7 +1272,7 @@ pub(crate) mod tests {
 
     #[test]
     fn release_with_rollback_rejects_non_holder() {
-        let store = ContextStore::open_in_memory().unwrap();
+        let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         store
             .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)

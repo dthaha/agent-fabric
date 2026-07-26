@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
-use fabric_context::ContextStore;
+use fabric_context::SqliteContextStore;
 use fabric_policy::PolicyStore;
 
 use crate::config::DaemonConfig;
@@ -14,12 +14,12 @@ use crate::config::DaemonConfig;
 pub struct DaemonState {
     pub cfg: DaemonConfig,
     pub started: Instant,
-    pub store: Mutex<ContextStore>,
+    pub store: Mutex<SqliteContextStore>,
     pub policy: RwLock<PolicyStore>,
 }
 
 impl DaemonState {
-    pub fn new(cfg: DaemonConfig, store: ContextStore) -> Arc<Self> {
+    pub fn new(cfg: DaemonConfig, store: SqliteContextStore) -> Arc<Self> {
         Arc::new(Self {
             cfg,
             started: Instant::now(),
