@@ -29,14 +29,17 @@ pub const SYSTEM_PROMPT: &str = include_str!("../../../models/conflict-decoder/s
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
 /// Default model when `FABRIC_DECODER_MODEL` is not set.
-const DEFAULT_MODEL: &str = "poolside/laguna-xs-2.1";
+const DEFAULT_MODEL: &str = "nvidia/nemotron-3-nano-30b-a3b";
 
 /// Default generation parameters, tuned for classify-ONLY decoding: near-
-/// deterministic sampling, thinking off, short output budget.
+/// deterministic sampling, reasoning OFF, short output budget. The decoder
+/// is a classifier, not a reasoner: any chain-of-thought effort (even
+/// `low`) burns tokens on CoT and mangles the structured JSON output, so
+/// it MUST run with `reasoning: none` (eval-verified, July 2026).
 const DEFAULT_TEMPERATURE: f64 = 0.1;
 const DEFAULT_TOP_K: u32 = 20;
 const DEFAULT_TOP_P: f64 = 0.9;
-const DEFAULT_ENABLE_THINKING: bool = false;
+const DEFAULT_REASONING_EFFORT: &str = "none";
 const DEFAULT_MAX_TOKENS: u32 = 300;
 
 /// The locked verdict output contract as a real JSON Schema, used for
@@ -81,13 +84,17 @@ pub struct ConstrainedDecoderConfig {
     pub base_url: String,
     /// Bearer token, if the endpoint requires one. Local servers often don't.
     pub api_key: Option<String>,
-    /// Model name to request (e.g. `poolside/laguna-xs-2.1`).
+    /// Model name to request (e.g. `nvidia/nemotron-3-nano-30b-a3b`).
     pub model: String,
     pub timeout_ms: u64,
     pub temperature: f64,
     pub top_k: u32,
     pub top_p: f64,
-    pub enable_thinking: bool,
+    /// OpenRouter reasoning effort (`none`, `low`, `medium`, `high`). Sent as
+    /// `reasoning: {"effort": ...}` in the request body. OpenRouter does NOT
+    /// honor `enable_thinking: bool`; reasoning effort is the only working
+    /// control. Decoder default is `none` — CoT poisons structured output.
+    pub reasoning_effort: String,
     pub max_tokens: u32,
 }
 
@@ -96,7 +103,7 @@ impl ConstrainedDecoderConfig {
     /// `OPENAI_API_KEY` (optional), `FABRIC_DECODER_MODEL` (optional; falls
     /// back to the default), `FABRIC_DECODER_TIMEOUT_MS`,
     /// `FABRIC_DECODER_TEMPERATURE`, `FABRIC_DECODER_TOP_K`,
-    /// `FABRIC_DECODER_TOP_P`, `FABRIC_DECODER_ENABLE_THINKING`,
+    /// `FABRIC_DECODER_TOP_P`, `FABRIC_DECODER_REASONING_EFFORT`,
     /// `FABRIC_DECODER_MAX_TOKENS` (all optional).
     pub fn from_env() -> Result<Self, DecoderError> {
         Self::resolve(
@@ -107,7 +114,7 @@ impl ConstrainedDecoderConfig {
             std::env::var("FABRIC_DECODER_TEMPERATURE").ok(),
             std::env::var("FABRIC_DECODER_TOP_K").ok(),
             std::env::var("FABRIC_DECODER_TOP_P").ok(),
-            std::env::var("FABRIC_DECODER_ENABLE_THINKING").ok(),
+            std::env::var("FABRIC_DECODER_REASONING_EFFORT").ok(),
             std::env::var("FABRIC_DECODER_MAX_TOKENS").ok(),
         )
     }
@@ -121,7 +128,7 @@ impl ConstrainedDecoderConfig {
         temperature: Option<String>,
         top_k: Option<String>,
         top_p: Option<String>,
-        enable_thinking: Option<String>,
+        reasoning_effort: Option<String>,
         max_tokens: Option<String>,
     ) -> Result<Self, DecoderError> {
         let base_url = base_url
@@ -158,12 +165,15 @@ impl ConstrainedDecoderConfig {
                 .map_err(|_| DecoderError::Config(format!("invalid top_p '{raw}'")))?,
             None => DEFAULT_TOP_P,
         };
-        let enable_thinking = match enable_thinking {
-            Some(raw) => raw
-                .trim()
-                .parse::<bool>()
-                .map_err(|_| DecoderError::Config(format!("invalid enable_thinking '{raw}'")))?,
-            None => DEFAULT_ENABLE_THINKING,
+        let reasoning_effort = match reasoning_effort {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return Err(DecoderError::Config("invalid reasoning_effort ''".into()));
+                }
+                trimmed.to_string()
+            }
+            None => DEFAULT_REASONING_EFFORT.to_string(),
         };
         let max_tokens = match max_tokens {
             Some(raw) => raw
@@ -180,7 +190,7 @@ impl ConstrainedDecoderConfig {
             temperature,
             top_k,
             top_p,
-            enable_thinking,
+            reasoning_effort,
             max_tokens,
         })
     }
@@ -235,7 +245,8 @@ impl ConstrainedDecoder {
             "temperature": self.config.temperature,
             "top_k": self.config.top_k,
             "top_p": self.config.top_p,
-            "enable_thinking": self.config.enable_thinking,
+            "reasoning": {"effort": self.config.reasoning_effort},
+            "provider": {"sort": "throughput"},
             "max_tokens": self.config.max_tokens
         });
         if constrained {
@@ -359,7 +370,7 @@ mod tests {
         assert_eq!(cfg.temperature, DEFAULT_TEMPERATURE);
         assert_eq!(cfg.top_k, DEFAULT_TOP_K);
         assert_eq!(cfg.top_p, DEFAULT_TOP_P);
-        assert_eq!(cfg.enable_thinking, DEFAULT_ENABLE_THINKING);
+        assert_eq!(cfg.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert_eq!(cfg.max_tokens, DEFAULT_MAX_TOKENS);
         let cfg = ConstrainedDecoderConfig::resolve(
             Some("http://localhost:8000".into()),
@@ -417,14 +428,14 @@ mod tests {
             Some("0.3".into()),
             Some("40".into()),
             Some("0.8".into()),
-            Some("true".into()),
+            Some("low".into()),
             Some("512".into()),
         )
         .unwrap();
         assert_eq!(cfg.temperature, 0.3);
         assert_eq!(cfg.top_k, 40);
         assert_eq!(cfg.top_p, 0.8);
-        assert!(cfg.enable_thinking);
+        assert_eq!(cfg.reasoning_effort, "low");
         assert_eq!(cfg.max_tokens, 512);
         assert!(ConstrainedDecoderConfig::resolve(
             Some("http://x".into()),
@@ -450,7 +461,7 @@ mod tests {
             temperature: DEFAULT_TEMPERATURE,
             top_k: DEFAULT_TOP_K,
             top_p: DEFAULT_TOP_P,
-            enable_thinking: DEFAULT_ENABLE_THINKING,
+            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
         };
         assert_eq!(
@@ -490,7 +501,7 @@ mod tests {
             temperature: DEFAULT_TEMPERATURE,
             top_k: DEFAULT_TOP_K,
             top_p: DEFAULT_TOP_P,
-            enable_thinking: DEFAULT_ENABLE_THINKING,
+            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
         })
     }
@@ -499,6 +510,8 @@ mod tests {
     fn constrained_body_carries_json_schema_and_prompt() {
         let body = test_decoder().request_body(&sample_input(), true);
         assert_eq!(body["model"], "qwen");
+        assert_eq!(body["reasoning"]["effort"], "none");
+        assert_eq!(body["provider"]["sort"], "throughput");
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][0]["content"], SYSTEM_PROMPT);
         assert!(body["messages"][1]["content"]

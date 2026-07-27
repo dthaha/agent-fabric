@@ -35,14 +35,18 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 /// Default model when neither `FABRIC_MEDIATOR_MODEL` nor
 /// `FABRIC_DECODER_MODEL` is set.
-const DEFAULT_MODEL: &str = "poolside/laguna-xs-2.1";
+const DEFAULT_MODEL: &str = "nvidia/nemotron-3-nano-30b-a3b";
 
-/// Default generation parameters, tuned for propose-ONLY mediation:
-/// reasoning on, a modest sampling budget, room for rationale.
+/// Default generation parameters, tuned for propose-ONLY mediation: deep
+/// reasoning on the cold path, a modest sampling budget, room for
+/// rationale. The mediator runs with `reasoning: high` — it must reason
+/// deeply about resolution strategy (eval-verified, July 2026: 54.4%
+/// resolution at 100% schema compliance), while the Tier 4 policy veto
+/// provides the safety floor.
 const DEFAULT_TEMPERATURE: f64 = 0.7;
 const DEFAULT_TOP_K: u32 = 20;
 const DEFAULT_TOP_P: f64 = 0.9;
-const DEFAULT_ENABLE_THINKING: bool = true;
+const DEFAULT_REASONING_EFFORT: &str = "high";
 const DEFAULT_MAX_TOKENS: u32 = 2048;
 
 /// The locked proposal output contract as a real JSON Schema, used for
@@ -98,13 +102,18 @@ pub struct ConstrainedMediatorConfig {
     pub base_url: String,
     /// Bearer token, if the endpoint requires one. Local servers often don't.
     pub api_key: Option<String>,
-    /// Model name to request (e.g. `poolside/laguna-xs-2.1`).
+    /// Model name to request (e.g. `nvidia/nemotron-3-nano-30b-a3b`).
     pub model: String,
     pub timeout_ms: u64,
     pub temperature: f64,
     pub top_k: u32,
     pub top_p: f64,
-    pub enable_thinking: bool,
+    /// OpenRouter reasoning effort (`none`, `low`, `medium`, `high`). Sent as
+    /// `reasoning: {"effort": ...}` in the request body. OpenRouter does NOT
+    /// honor `enable_thinking: bool`; reasoning effort is the only working
+    /// control. Mediator default is `high` — cold-path evaluation needs deep
+    /// reasoning.
+    pub reasoning_effort: String,
     pub max_tokens: u32,
 }
 
@@ -114,7 +123,7 @@ impl ConstrainedMediatorConfig {
     /// back to `FABRIC_DECODER_MODEL`, then the default),
     /// `FABRIC_MEDIATOR_TIMEOUT_MS`, `FABRIC_MEDIATOR_TEMPERATURE`,
     /// `FABRIC_MEDIATOR_TOP_K`, `FABRIC_MEDIATOR_TOP_P`,
-    /// `FABRIC_MEDIATOR_ENABLE_THINKING`, `FABRIC_MEDIATOR_MAX_TOKENS`
+    /// `FABRIC_MEDIATOR_REASONING_EFFORT`, `FABRIC_MEDIATOR_MAX_TOKENS`
     /// (all optional).
     pub fn from_env() -> Result<Self, MediatorError> {
         let model = std::env::var("FABRIC_MEDIATOR_MODEL")
@@ -128,7 +137,7 @@ impl ConstrainedMediatorConfig {
             std::env::var("FABRIC_MEDIATOR_TEMPERATURE").ok(),
             std::env::var("FABRIC_MEDIATOR_TOP_K").ok(),
             std::env::var("FABRIC_MEDIATOR_TOP_P").ok(),
-            std::env::var("FABRIC_MEDIATOR_ENABLE_THINKING").ok(),
+            std::env::var("FABRIC_MEDIATOR_REASONING_EFFORT").ok(),
             std::env::var("FABRIC_MEDIATOR_MAX_TOKENS").ok(),
         )
     }
@@ -142,7 +151,7 @@ impl ConstrainedMediatorConfig {
         temperature: Option<String>,
         top_k: Option<String>,
         top_p: Option<String>,
-        enable_thinking: Option<String>,
+        reasoning_effort: Option<String>,
         max_tokens: Option<String>,
     ) -> Result<Self, MediatorError> {
         let base_url = base_url
@@ -179,12 +188,15 @@ impl ConstrainedMediatorConfig {
                 .map_err(|_| MediatorError::Config(format!("invalid top_p '{raw}'")))?,
             None => DEFAULT_TOP_P,
         };
-        let enable_thinking = match enable_thinking {
-            Some(raw) => raw
-                .trim()
-                .parse::<bool>()
-                .map_err(|_| MediatorError::Config(format!("invalid enable_thinking '{raw}'")))?,
-            None => DEFAULT_ENABLE_THINKING,
+        let reasoning_effort = match reasoning_effort {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return Err(MediatorError::Config("invalid reasoning_effort ''".into()));
+                }
+                trimmed.to_string()
+            }
+            None => DEFAULT_REASONING_EFFORT.to_string(),
         };
         let max_tokens = match max_tokens {
             Some(raw) => raw
@@ -201,7 +213,7 @@ impl ConstrainedMediatorConfig {
             temperature,
             top_k,
             top_p,
-            enable_thinking,
+            reasoning_effort,
             max_tokens,
         })
     }
@@ -257,7 +269,8 @@ impl ConstrainedMediator {
             "temperature": self.config.temperature,
             "top_k": self.config.top_k,
             "top_p": self.config.top_p,
-            "enable_thinking": self.config.enable_thinking,
+            "reasoning": {"effort": self.config.reasoning_effort},
+            "provider": {"sort": "throughput"},
             "max_tokens": self.config.max_tokens
         });
         if constrained {
@@ -377,7 +390,7 @@ mod tests {
         assert_eq!(cfg.temperature, DEFAULT_TEMPERATURE);
         assert_eq!(cfg.top_k, DEFAULT_TOP_K);
         assert_eq!(cfg.top_p, DEFAULT_TOP_P);
-        assert_eq!(cfg.enable_thinking, DEFAULT_ENABLE_THINKING);
+        assert_eq!(cfg.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert_eq!(cfg.max_tokens, DEFAULT_MAX_TOKENS);
         let cfg = ConstrainedMediatorConfig::resolve(
             Some("http://x".into()),
@@ -405,14 +418,14 @@ mod tests {
             Some("0.4".into()),
             Some("50".into()),
             Some("0.95".into()),
-            Some("false".into()),
+            Some("medium".into()),
             Some("4096".into()),
         )
         .unwrap();
         assert_eq!(cfg.temperature, 0.4);
         assert_eq!(cfg.top_k, 50);
         assert_eq!(cfg.top_p, 0.95);
-        assert!(!cfg.enable_thinking);
+        assert_eq!(cfg.reasoning_effort, "medium");
         assert_eq!(cfg.max_tokens, 4096);
         assert!(ConstrainedMediatorConfig::resolve(
             Some("http://x".into()),
@@ -438,7 +451,7 @@ mod tests {
             temperature: DEFAULT_TEMPERATURE,
             top_k: DEFAULT_TOP_K,
             top_p: DEFAULT_TOP_P,
-            enable_thinking: DEFAULT_ENABLE_THINKING,
+            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
         };
         assert_eq!(
@@ -480,7 +493,7 @@ mod tests {
             temperature: DEFAULT_TEMPERATURE,
             top_k: DEFAULT_TOP_K,
             top_p: DEFAULT_TOP_P,
-            enable_thinking: DEFAULT_ENABLE_THINKING,
+            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
         })
     }
@@ -497,6 +510,8 @@ mod tests {
     fn constrained_body_carries_json_schema_and_prompt() {
         let body = test_mediator().request_body(&sample_input(), true);
         assert_eq!(body["model"], "qwen");
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert_eq!(body["provider"]["sort"], "throughput");
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][0]["content"], SYSTEM_PROMPT);
         assert!(body["messages"][1]["content"]

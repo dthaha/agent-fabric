@@ -183,9 +183,36 @@ The fabric emits OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to ship traces
 
 `RUST_LOG` controls verbosity (default `info`). Tool dispatch spans carry `request_id`, `session_id`, `lease_id`, and `tool_name` so traces correlate end-to-end across the tool plane.
 
+## Conflict resolution model selection
+
+Both the decoder (Tier 2) and mediator (Tier 3) use **NVIDIA Nemotron 3 Nano 30B A3B** via OpenRouter, selected after empirical evaluation (July 2026, 118 scenarios: 72 decoder + 46 mediator).
+
+| Metric | Nemotron 3 Nano | Laguna XS 2.1 |
+|---|---|---|
+| Decoder accuracy | **65.3%** | 63.9% |
+| Decoder schema compliance | **100%** | 91.7% |
+| Mediator resolution | **54.4%** | 41.3% |
+| Mediator kind accuracy | **84.8%** | 69.6% |
+| Mediator schema compliance | **100%** | 76.1% |
+
+Key findings:
+- **Reasoning parameters are poison for classifiers.** Any reasoning effort (even `low`) causes models to burn tokens on CoT and mangle structured JSON output. The decoder MUST run with `reasoning: none`.
+- **The mediator needs reasoning.** With `reasoning: high`, the mediator achieves 54.4% resolution and 84.8% kind accuracy — the policy veto (Tier 4) provides the safety floor.
+- **Schema compliance is non-negotiable.** Nemotron achieves 100% on both tiers; Laguna breaks under reasoning (76.1% mediator schema).
+- **Provider infrastructure drives latency, not model size.** Both are ~30B MoE / ~3B active params. Poolside serves Laguna first-party (606ms p50); Nemotron routes through Crusoe/DeepInfra/Novita (~3.6s p50). The 6x gap is serving infra, not architecture.
+- **Nemotron is non-Chinese** (NVIDIA), satisfying the US government scrutiny constraint on Chinese open-weight models.
+
+Configuration (env vars):
+- `FABRIC_DECODER_MODEL` — default: `nvidia/nemotron-3-nano-30b-a3b`
+- `FABRIC_MEDIATOR_MODEL` — default: falls back to decoder model
+- `FABRIC_DECODER_REASONING_EFFORT` — default: `none`
+- `FABRIC_MEDIATOR_REASONING_EFFORT` — default: `high`
+- `OPENAI_BASE_URL` — OpenRouter: `https://openrouter.ai/api/v1`
+
 ## TODO
 
-- [ ] Fine-tune Laguna XS 2.1 on synthetic conflict data (SFT/LoRA) — same weights serve both decoder (thinking off) and mediator (thinking on) tiers
+- [ ] Fine-tune Nemotron 3 Nano on synthetic conflict data (QLoRA, 4-bit) — same weights serve both decoder (reasoning off) and mediator (reasoning high) tiers
+- [ ] Investigate first-party Nemotron serving (NVIDIA NIM) to close the latency gap vs Poolside
 
 ## License
 
