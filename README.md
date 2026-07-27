@@ -205,9 +205,31 @@ Key findings:
 Configuration (env vars):
 - `FABRIC_DECODER_MODEL` — default: `nvidia/nemotron-3-nano-30b-a3b`
 - `FABRIC_MEDIATOR_MODEL` — default: falls back to decoder model
-- `FABRIC_DECODER_REASONING_EFFORT` — default: `none`
-- `FABRIC_MEDIATOR_REASONING_EFFORT` — default: `high`
+- `FABRIC_DECODER_EXTRA_BODY` — optional JSON object, vendor-specific request body extensions
+- `FABRIC_MEDIATOR_EXTRA_BODY` — optional JSON object, vendor-specific request body extensions
 - `OPENAI_BASE_URL` — OpenRouter: `https://openrouter.ai/api/v1`
+
+### OpenRouter advisory
+
+The eval results above were measured via OpenRouter. If you route through OpenRouter, set the following vendor extensions via `extra_body`:
+
+**Decoder** (`FABRIC_DECODER_EXTRA_BODY`):
+```json
+{"reasoning": {"effort": "none"}, "provider": {"sort": "throughput"}, "top_k": 20}
+```
+
+**Mediator** (`FABRIC_MEDIATOR_EXTRA_BODY`):
+```json
+{"reasoning": {"effort": "high"}, "provider": {"sort": "throughput"}, "top_k": 20}
+```
+
+Why these matter on OpenRouter specifically:
+- **`reasoning: {"effort": "none"}`** — OpenRouter defaults to some reasoning for Nemotron. Without explicitly disabling it, the decoder burns tokens on CoT and mangles structured JSON output (schema compliance drops from 100% to ~60%).
+- **`reasoning: {"effort": "high"}`** — The mediator needs deep reasoning. Without it, resolution accuracy drops ~15 points.
+- **`provider: {"sort": "throughput"}`** — Biases OpenRouter to the fastest-serving provider (Crusoe/DeepInfra/Novita for Nemotron).
+- **`top_k: 20`** — Not in the OpenAI spec but supported by OpenRouter. Tightens sampling for the decoder.
+
+If you use NVIDIA NIM, vLLM, Together, or another OpenAI-compatible backend, leave `extra_body` unset — the fabric sends only standard fields and the model works fine without these extensions.
 
 ## TODO
 

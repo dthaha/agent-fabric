@@ -28,29 +28,27 @@ check:
 	cargo fmt --all -- --check
 
 # Live conflict-decoder eval against a real endpoint. Opt-in; pre-wired to
-# Laguna XS 2.1 (thinking OFF, classify-tuned sampling). Requires
-# OPENAI_BASE_URL (OPENAI_API_KEY if the endpoint needs auth). Not run in
-# CI — the DRY eval runs in `make test` instead.
+# Nemotron 3 Nano via OpenRouter (reasoning OFF via extra_body, classify-
+# tuned sampling). Requires OPENAI_BASE_URL (OPENAI_API_KEY if the endpoint
+# needs auth). Not run in CI — the DRY eval runs in `make test` instead.
 eval-decoder:
-	FABRIC_DECODER_MODEL=poolside/laguna-xs-2.1 \
+	FABRIC_DECODER_MODEL=nvidia/nemotron-3-nano-30b-a3b \
 	FABRIC_DECODER_TEMPERATURE=0.1 \
-	FABRIC_DECODER_TOP_K=20 \
 	FABRIC_DECODER_TOP_P=0.9 \
-	FABRIC_DECODER_REASONING_EFFORT=none \
 	FABRIC_DECODER_MAX_TOKENS=300 \
 	FABRIC_DECODER_TIMEOUT_MS=30000 \
+	FABRIC_DECODER_EXTRA_BODY={\"reasoning\":{\"effort\":\"none\"},\"provider\":{\"sort\":\"throughput\"},\"top_k\":20} \
 	cargo test -p fabric-context --test decoder_eval live -- --ignored --nocapture
 
 # Live conflict-mediator eval against a real endpoint. Opt-in; pre-wired to
-# Laguna XS 2.1 (thinking ON, mediation-tuned sampling). Requires
-# OPENAI_BASE_URL (OPENAI_API_KEY if the endpoint needs auth). Not run in
-# CI — the DRY eval runs in `make test` instead.
+# Nemotron 3 Nano via OpenRouter (reasoning ON via extra_body, mediation-
+# tuned sampling). Requires OPENAI_BASE_URL (OPENAI_API_KEY if the endpoint
+# needs auth). Not run in CI — the DRY eval runs in `make test` instead.
 eval-mediator:
-	FABRIC_MEDIATOR_MODEL=poolside/laguna-xs-2.1 \
+	FABRIC_MEDIATOR_MODEL=nvidia/nemotron-3-nano-30b-a3b \
 	FABRIC_MEDIATOR_TEMPERATURE=0.7 \
-	FABRIC_MEDIATOR_TOP_K=20 \
 	FABRIC_MEDIATOR_TOP_P=0.9 \
-	FABRIC_MEDIATOR_REASONING_EFFORT=high \
 	FABRIC_MEDIATOR_MAX_TOKENS=2048 \
 	FABRIC_MEDIATOR_TIMEOUT_MS=120000 \
+	FABRIC_MEDIATOR_EXTRA_BODY={\"reasoning\":{\"effort\":\"high\"},\"provider\":{\"sort\":\"throughput\"},\"top_k\":20} \
 	cargo test -p fabric-context --test mediator_eval live -- --ignored --nocapture

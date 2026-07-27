@@ -32,14 +32,13 @@ const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MODEL: &str = "nvidia/nemotron-3-nano-30b-a3b";
 
 /// Default generation parameters, tuned for classify-ONLY decoding: near-
-/// deterministic sampling, reasoning OFF, short output budget. The decoder
-/// is a classifier, not a reasoner: any chain-of-thought effort (even
-/// `low`) burns tokens on CoT and mangles the structured JSON output, so
-/// it MUST run with `reasoning: none` (eval-verified, July 2026).
+/// deterministic sampling, short output budget. The decoder is a classifier,
+/// not a reasoner: any chain-of-thought burns tokens on CoT and mangles the
+/// structured JSON output, so reasoning should be disabled on providers that
+/// support it — pass `{"reasoning": {"effort": "none"}}` via
+/// `FABRIC_DECODER_EXTRA_BODY` (eval-verified, July 2026).
 const DEFAULT_TEMPERATURE: f64 = 0.1;
-const DEFAULT_TOP_K: u32 = 20;
 const DEFAULT_TOP_P: f64 = 0.9;
-const DEFAULT_REASONING_EFFORT: &str = "none";
 const DEFAULT_MAX_TOKENS: u32 = 300;
 
 /// The locked verdict output contract as a real JSON Schema, used for
@@ -88,23 +87,25 @@ pub struct ConstrainedDecoderConfig {
     pub model: String,
     pub timeout_ms: u64,
     pub temperature: f64,
-    pub top_k: u32,
     pub top_p: f64,
-    /// OpenRouter reasoning effort (`none`, `low`, `medium`, `high`). Sent as
-    /// `reasoning: {"effort": ...}` in the request body. OpenRouter does NOT
-    /// honor `enable_thinking: bool`; reasoning effort is the only working
-    /// control. Decoder default is `none` — CoT poisons structured output.
-    pub reasoning_effort: String,
     pub max_tokens: u32,
+    /// Vendor-specific request body extensions, merged into the JSON body
+    /// after standard fields. Parsed from `FABRIC_DECODER_EXTRA_BODY` as a
+    /// JSON object string. Use this for provider-specific parameters like
+    /// OpenRouter reasoning effort or provider routing. Standard OpenAI
+    /// fields (model, messages, temperature, top_p, max_tokens,
+    /// response_format) are always set by the fabric and cannot be
+    /// overridden via extra_body.
+    pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl ConstrainedDecoderConfig {
     /// Resolve config from the environment: `OPENAI_BASE_URL` (required),
     /// `OPENAI_API_KEY` (optional), `FABRIC_DECODER_MODEL` (optional; falls
     /// back to the default), `FABRIC_DECODER_TIMEOUT_MS`,
-    /// `FABRIC_DECODER_TEMPERATURE`, `FABRIC_DECODER_TOP_K`,
-    /// `FABRIC_DECODER_TOP_P`, `FABRIC_DECODER_REASONING_EFFORT`,
-    /// `FABRIC_DECODER_MAX_TOKENS` (all optional).
+    /// `FABRIC_DECODER_TEMPERATURE`, `FABRIC_DECODER_TOP_P`,
+    /// `FABRIC_DECODER_MAX_TOKENS`, `FABRIC_DECODER_EXTRA_BODY`
+    /// (all optional).
     pub fn from_env() -> Result<Self, DecoderError> {
         Self::resolve(
             std::env::var("OPENAI_BASE_URL").ok(),
@@ -112,10 +113,9 @@ impl ConstrainedDecoderConfig {
             std::env::var("FABRIC_DECODER_MODEL").ok(),
             std::env::var("FABRIC_DECODER_TIMEOUT_MS").ok(),
             std::env::var("FABRIC_DECODER_TEMPERATURE").ok(),
-            std::env::var("FABRIC_DECODER_TOP_K").ok(),
             std::env::var("FABRIC_DECODER_TOP_P").ok(),
-            std::env::var("FABRIC_DECODER_REASONING_EFFORT").ok(),
             std::env::var("FABRIC_DECODER_MAX_TOKENS").ok(),
+            std::env::var("FABRIC_DECODER_EXTRA_BODY").ok(),
         )
     }
 
@@ -126,10 +126,9 @@ impl ConstrainedDecoderConfig {
         model: Option<String>,
         timeout_ms: Option<String>,
         temperature: Option<String>,
-        top_k: Option<String>,
         top_p: Option<String>,
-        reasoning_effort: Option<String>,
         max_tokens: Option<String>,
+        extra_body: Option<String>,
     ) -> Result<Self, DecoderError> {
         let base_url = base_url
             .filter(|s| !s.trim().is_empty())
@@ -151,29 +150,12 @@ impl ConstrainedDecoderConfig {
                 .map_err(|_| DecoderError::Config(format!("invalid temperature '{raw}'")))?,
             None => DEFAULT_TEMPERATURE,
         };
-        let top_k = match top_k {
-            Some(raw) => raw
-                .trim()
-                .parse::<u32>()
-                .map_err(|_| DecoderError::Config(format!("invalid top_k '{raw}'")))?,
-            None => DEFAULT_TOP_K,
-        };
         let top_p = match top_p {
             Some(raw) => raw
                 .trim()
                 .parse::<f64>()
                 .map_err(|_| DecoderError::Config(format!("invalid top_p '{raw}'")))?,
             None => DEFAULT_TOP_P,
-        };
-        let reasoning_effort = match reasoning_effort {
-            Some(raw) => {
-                let trimmed = raw.trim();
-                if trimmed.is_empty() {
-                    return Err(DecoderError::Config("invalid reasoning_effort ''".into()));
-                }
-                trimmed.to_string()
-            }
-            None => DEFAULT_REASONING_EFFORT.to_string(),
         };
         let max_tokens = match max_tokens {
             Some(raw) => raw
@@ -182,16 +164,30 @@ impl ConstrainedDecoderConfig {
                 .map_err(|_| DecoderError::Config(format!("invalid max_tokens '{raw}'")))?,
             None => DEFAULT_MAX_TOKENS,
         };
+        let extra_body = match extra_body {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    let map: serde_json::Map<String, serde_json::Value> =
+                        serde_json::from_str(trimmed).map_err(|e| {
+                            DecoderError::Config(format!("invalid extra_body JSON: {e}"))
+                        })?;
+                    Some(map)
+                }
+            }
+            None => None,
+        };
         Ok(ConstrainedDecoderConfig {
             base_url,
             api_key: api_key.filter(|s| !s.trim().is_empty()),
             model,
             timeout_ms,
             temperature,
-            top_k,
             top_p,
-            reasoning_effort,
             max_tokens,
+            extra_body,
         })
     }
 
@@ -231,10 +227,12 @@ impl ConstrainedDecoder {
         &self.config
     }
 
-    /// Build the chat-completions request body. When `constrained` is true the
-    /// body carries `response_format: json_schema` for structured-output
-    /// decoding; when false (fallback path) the system prompt alone carries
-    /// the "exactly one JSON object" contract.
+    /// Build the chat-completions request body: pure OpenAI Chat
+    /// Completions standard fields, plus any vendor extensions from
+    /// `extra_body` (which cannot override standard fields). When
+    /// `constrained` is true the body carries `response_format: json_schema`
+    /// for structured-output decoding; when false (fallback path) the system
+    /// prompt alone carries the "exactly one JSON object" contract.
     fn request_body(&self, input: &DecoderInput, constrained: bool) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
@@ -243,12 +241,16 @@ impl ConstrainedDecoder {
                 {"role": "user", "content": input.render_prompt()}
             ],
             "temperature": self.config.temperature,
-            "top_k": self.config.top_k,
             "top_p": self.config.top_p,
-            "reasoning": {"effort": self.config.reasoning_effort},
-            "provider": {"sort": "throughput"},
             "max_tokens": self.config.max_tokens
         });
+        if let Some(extra) = &self.config.extra_body {
+            for (k, v) in extra {
+                if !body.as_object().unwrap().contains_key(k) {
+                    body[k] = v.clone();
+                }
+            }
+        }
         if constrained {
             body["response_format"] = serde_json::json!({
                 "type": "json_schema",
@@ -348,7 +350,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
                 None
             ),
             Err(DecoderError::Config(_))
@@ -362,21 +363,18 @@ mod tests {
             None,
             None,
             None,
-            None,
         )
         .unwrap();
         assert_eq!(cfg.model, DEFAULT_MODEL);
         assert_eq!(cfg.timeout_ms, DEFAULT_TIMEOUT_MS);
         assert_eq!(cfg.temperature, DEFAULT_TEMPERATURE);
-        assert_eq!(cfg.top_k, DEFAULT_TOP_K);
         assert_eq!(cfg.top_p, DEFAULT_TOP_P);
-        assert_eq!(cfg.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert_eq!(cfg.max_tokens, DEFAULT_MAX_TOKENS);
+        assert_eq!(cfg.extra_body, None);
         let cfg = ConstrainedDecoderConfig::resolve(
             Some("http://localhost:8000".into()),
             None,
             Some("qwen".into()),
-            None,
             None,
             None,
             None,
@@ -399,7 +397,6 @@ mod tests {
             None,
             None,
             None,
-            None,
         )
         .unwrap();
         assert_eq!(cfg.timeout_ms, 5000);
@@ -409,7 +406,6 @@ mod tests {
             None,
             Some("m".into()),
             Some("not-a-number".into()),
-            None,
             None,
             None,
             None,
@@ -426,16 +422,13 @@ mod tests {
             None,
             None,
             Some("0.3".into()),
-            Some("40".into()),
             Some("0.8".into()),
-            Some("low".into()),
             Some("512".into()),
+            None,
         )
         .unwrap();
         assert_eq!(cfg.temperature, 0.3);
-        assert_eq!(cfg.top_k, 40);
         assert_eq!(cfg.top_p, 0.8);
-        assert_eq!(cfg.reasoning_effort, "low");
         assert_eq!(cfg.max_tokens, 512);
         assert!(ConstrainedDecoderConfig::resolve(
             Some("http://x".into()),
@@ -446,9 +439,68 @@ mod tests {
             None,
             None,
             None,
-            None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn resolve_parses_extra_body_json() {
+        let cfg = ConstrainedDecoderConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(r#"{"reasoning":{"effort":"none"},"top_k":20}"#.into()),
+        )
+        .unwrap();
+        let extra = cfg.extra_body.unwrap();
+        assert_eq!(extra["reasoning"]["effort"], "none");
+        assert_eq!(extra["top_k"], 20);
+        let cfg = ConstrainedDecoderConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("   ".into()),
+        )
+        .unwrap();
+        assert_eq!(cfg.extra_body, None);
+    }
+
+    #[test]
+    fn resolve_rejects_invalid_extra_body_json() {
+        assert!(matches!(
+            ConstrainedDecoderConfig::resolve(
+                Some("http://x".into()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("not-json".into()),
+            ),
+            Err(DecoderError::Config(_))
+        ));
+        assert!(matches!(
+            ConstrainedDecoderConfig::resolve(
+                Some("http://x".into()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(r#"["not","an","object"]"#.into()),
+            ),
+            Err(DecoderError::Config(_))
+        ));
     }
 
     #[test]
@@ -459,10 +511,9 @@ mod tests {
             model: "m".into(),
             timeout_ms: 1000,
             temperature: DEFAULT_TEMPERATURE,
-            top_k: DEFAULT_TOP_K,
             top_p: DEFAULT_TOP_P,
-            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
+            extra_body: None,
         };
         assert_eq!(
             bare.completions_url(),
@@ -499,10 +550,9 @@ mod tests {
             model: "qwen".into(),
             timeout_ms: 1000,
             temperature: DEFAULT_TEMPERATURE,
-            top_k: DEFAULT_TOP_K,
             top_p: DEFAULT_TOP_P,
-            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
+            extra_body: None,
         })
     }
 
@@ -510,8 +560,9 @@ mod tests {
     fn constrained_body_carries_json_schema_and_prompt() {
         let body = test_decoder().request_body(&sample_input(), true);
         assert_eq!(body["model"], "qwen");
-        assert_eq!(body["reasoning"]["effort"], "none");
-        assert_eq!(body["provider"]["sort"], "throughput");
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("provider").is_none());
+        assert!(body.get("top_k").is_none());
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][0]["content"], SYSTEM_PROMPT);
         assert!(body["messages"][1]["content"]
@@ -526,6 +577,24 @@ mod tests {
             rf["json_schema"]["schema"]["properties"]["relation"]["enum"],
             serde_json::json!(["SUPERSEDES", "CONTRADICTS", "INDEPENDENT", "AMBIGUOUS"])
         );
+    }
+
+    #[test]
+    fn extra_body_merges_but_cannot_override_standard_fields() {
+        let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(
+            r#"{"reasoning":{"effort":"none"},"provider":{"sort":"throughput"},"top_k":20,"temperature":9.9,"model":"evil"}"#,
+        )
+        .unwrap();
+        let decoder = ConstrainedDecoder::new(ConstrainedDecoderConfig {
+            extra_body: Some(extra),
+            ..test_decoder().config().clone()
+        });
+        let body = decoder.request_body(&sample_input(), true);
+        assert_eq!(body["reasoning"]["effort"], "none");
+        assert_eq!(body["provider"]["sort"], "throughput");
+        assert_eq!(body["top_k"], 20);
+        assert_eq!(body["temperature"], DEFAULT_TEMPERATURE);
+        assert_eq!(body["model"], "qwen");
     }
 
     #[test]

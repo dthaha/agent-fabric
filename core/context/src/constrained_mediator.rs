@@ -37,16 +37,14 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 /// `FABRIC_DECODER_MODEL` is set.
 const DEFAULT_MODEL: &str = "nvidia/nemotron-3-nano-30b-a3b";
 
-/// Default generation parameters, tuned for propose-ONLY mediation: deep
-/// reasoning on the cold path, a modest sampling budget, room for
-/// rationale. The mediator runs with `reasoning: high` — it must reason
-/// deeply about resolution strategy (eval-verified, July 2026: 54.4%
-/// resolution at 100% schema compliance), while the Tier 4 policy veto
-/// provides the safety floor.
+/// Default generation parameters, tuned for propose-ONLY mediation: a
+/// modest sampling budget, room for rationale. The mediator needs deep
+/// reasoning on the cold path — pass `{"reasoning": {"effort": "high"}}` via
+/// `FABRIC_MEDIATOR_EXTRA_BODY` on providers that support it (eval-verified,
+/// July 2026: 54.4% resolution at 100% schema compliance), while the Tier 4
+/// policy veto provides the safety floor.
 const DEFAULT_TEMPERATURE: f64 = 0.7;
-const DEFAULT_TOP_K: u32 = 20;
 const DEFAULT_TOP_P: f64 = 0.9;
-const DEFAULT_REASONING_EFFORT: &str = "high";
 const DEFAULT_MAX_TOKENS: u32 = 2048;
 
 /// The locked proposal output contract as a real JSON Schema, used for
@@ -106,15 +104,16 @@ pub struct ConstrainedMediatorConfig {
     pub model: String,
     pub timeout_ms: u64,
     pub temperature: f64,
-    pub top_k: u32,
     pub top_p: f64,
-    /// OpenRouter reasoning effort (`none`, `low`, `medium`, `high`). Sent as
-    /// `reasoning: {"effort": ...}` in the request body. OpenRouter does NOT
-    /// honor `enable_thinking: bool`; reasoning effort is the only working
-    /// control. Mediator default is `high` — cold-path evaluation needs deep
-    /// reasoning.
-    pub reasoning_effort: String,
     pub max_tokens: u32,
+    /// Vendor-specific request body extensions, merged into the JSON body
+    /// after standard fields. Parsed from `FABRIC_MEDIATOR_EXTRA_BODY` as a
+    /// JSON object string. Use this for provider-specific parameters like
+    /// OpenRouter reasoning effort or provider routing. Standard OpenAI
+    /// fields (model, messages, temperature, top_p, max_tokens,
+    /// response_format) are always set by the fabric and cannot be
+    /// overridden via extra_body.
+    pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl ConstrainedMediatorConfig {
@@ -122,9 +121,8 @@ impl ConstrainedMediatorConfig {
     /// `OPENAI_API_KEY` (optional), `FABRIC_MEDIATOR_MODEL` (optional; falls
     /// back to `FABRIC_DECODER_MODEL`, then the default),
     /// `FABRIC_MEDIATOR_TIMEOUT_MS`, `FABRIC_MEDIATOR_TEMPERATURE`,
-    /// `FABRIC_MEDIATOR_TOP_K`, `FABRIC_MEDIATOR_TOP_P`,
-    /// `FABRIC_MEDIATOR_REASONING_EFFORT`, `FABRIC_MEDIATOR_MAX_TOKENS`
-    /// (all optional).
+    /// `FABRIC_MEDIATOR_TOP_P`, `FABRIC_MEDIATOR_MAX_TOKENS`,
+    /// `FABRIC_MEDIATOR_EXTRA_BODY` (all optional).
     pub fn from_env() -> Result<Self, MediatorError> {
         let model = std::env::var("FABRIC_MEDIATOR_MODEL")
             .ok()
@@ -135,10 +133,9 @@ impl ConstrainedMediatorConfig {
             model,
             std::env::var("FABRIC_MEDIATOR_TIMEOUT_MS").ok(),
             std::env::var("FABRIC_MEDIATOR_TEMPERATURE").ok(),
-            std::env::var("FABRIC_MEDIATOR_TOP_K").ok(),
             std::env::var("FABRIC_MEDIATOR_TOP_P").ok(),
-            std::env::var("FABRIC_MEDIATOR_REASONING_EFFORT").ok(),
             std::env::var("FABRIC_MEDIATOR_MAX_TOKENS").ok(),
+            std::env::var("FABRIC_MEDIATOR_EXTRA_BODY").ok(),
         )
     }
 
@@ -149,10 +146,9 @@ impl ConstrainedMediatorConfig {
         model: Option<String>,
         timeout_ms: Option<String>,
         temperature: Option<String>,
-        top_k: Option<String>,
         top_p: Option<String>,
-        reasoning_effort: Option<String>,
         max_tokens: Option<String>,
+        extra_body: Option<String>,
     ) -> Result<Self, MediatorError> {
         let base_url = base_url
             .filter(|s| !s.trim().is_empty())
@@ -174,29 +170,12 @@ impl ConstrainedMediatorConfig {
                 .map_err(|_| MediatorError::Config(format!("invalid temperature '{raw}'")))?,
             None => DEFAULT_TEMPERATURE,
         };
-        let top_k = match top_k {
-            Some(raw) => raw
-                .trim()
-                .parse::<u32>()
-                .map_err(|_| MediatorError::Config(format!("invalid top_k '{raw}'")))?,
-            None => DEFAULT_TOP_K,
-        };
         let top_p = match top_p {
             Some(raw) => raw
                 .trim()
                 .parse::<f64>()
                 .map_err(|_| MediatorError::Config(format!("invalid top_p '{raw}'")))?,
             None => DEFAULT_TOP_P,
-        };
-        let reasoning_effort = match reasoning_effort {
-            Some(raw) => {
-                let trimmed = raw.trim();
-                if trimmed.is_empty() {
-                    return Err(MediatorError::Config("invalid reasoning_effort ''".into()));
-                }
-                trimmed.to_string()
-            }
-            None => DEFAULT_REASONING_EFFORT.to_string(),
         };
         let max_tokens = match max_tokens {
             Some(raw) => raw
@@ -205,16 +184,30 @@ impl ConstrainedMediatorConfig {
                 .map_err(|_| MediatorError::Config(format!("invalid max_tokens '{raw}'")))?,
             None => DEFAULT_MAX_TOKENS,
         };
+        let extra_body = match extra_body {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    let map: serde_json::Map<String, serde_json::Value> =
+                        serde_json::from_str(trimmed).map_err(|e| {
+                            MediatorError::Config(format!("invalid extra_body JSON: {e}"))
+                        })?;
+                    Some(map)
+                }
+            }
+            None => None,
+        };
         Ok(ConstrainedMediatorConfig {
             base_url,
             api_key: api_key.filter(|s| !s.trim().is_empty()),
             model,
             timeout_ms,
             temperature,
-            top_k,
             top_p,
-            reasoning_effort,
             max_tokens,
+            extra_body,
         })
     }
 
@@ -255,10 +248,12 @@ impl ConstrainedMediator {
         &self.config
     }
 
-    /// Build the chat-completions request body. When `constrained` is true
-    /// the body carries `response_format: json_schema` for structured-output
-    /// decoding; when false (fallback path) the system prompt alone carries
-    /// the "exactly one JSON object" contract.
+    /// Build the chat-completions request body: pure OpenAI Chat
+    /// Completions standard fields, plus any vendor extensions from
+    /// `extra_body` (which cannot override standard fields). When
+    /// `constrained` is true the body carries `response_format: json_schema`
+    /// for structured-output decoding; when false (fallback path) the system
+    /// prompt alone carries the "exactly one JSON object" contract.
     fn request_body(&self, input: &MediatorInput, constrained: bool) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
@@ -267,12 +262,16 @@ impl ConstrainedMediator {
                 {"role": "user", "content": input.render_prompt()}
             ],
             "temperature": self.config.temperature,
-            "top_k": self.config.top_k,
             "top_p": self.config.top_p,
-            "reasoning": {"effort": self.config.reasoning_effort},
-            "provider": {"sort": "throughput"},
             "max_tokens": self.config.max_tokens
         });
+        if let Some(extra) = &self.config.extra_body {
+            for (k, v) in extra {
+                if !body.as_object().unwrap().contains_key(k) {
+                    body[k] = v.clone();
+                }
+            }
+        }
         if constrained {
             body["response_format"] = serde_json::json!({
                 "type": "json_schema",
@@ -368,14 +367,11 @@ mod tests {
     #[test]
     fn resolve_requires_base_url_and_defaults_model() {
         assert!(matches!(
-            ConstrainedMediatorConfig::resolve(
-                None, None, None, None, None, None, None, None, None
-            ),
+            ConstrainedMediatorConfig::resolve(None, None, None, None, None, None, None, None),
             Err(MediatorError::Config(_))
         ));
         let cfg = ConstrainedMediatorConfig::resolve(
             Some("http://localhost:8000".into()),
-            None,
             None,
             None,
             None,
@@ -388,16 +384,14 @@ mod tests {
         assert_eq!(cfg.model, DEFAULT_MODEL);
         assert_eq!(cfg.timeout_ms, DEFAULT_TIMEOUT_MS);
         assert_eq!(cfg.temperature, DEFAULT_TEMPERATURE);
-        assert_eq!(cfg.top_k, DEFAULT_TOP_K);
         assert_eq!(cfg.top_p, DEFAULT_TOP_P);
-        assert_eq!(cfg.reasoning_effort, DEFAULT_REASONING_EFFORT);
         assert_eq!(cfg.max_tokens, DEFAULT_MAX_TOKENS);
+        assert_eq!(cfg.extra_body, None);
         let cfg = ConstrainedMediatorConfig::resolve(
             Some("http://x".into()),
             None,
             Some("qwen".into()),
             Some("5000".into()),
-            None,
             None,
             None,
             None,
@@ -416,16 +410,13 @@ mod tests {
             None,
             None,
             Some("0.4".into()),
-            Some("50".into()),
             Some("0.95".into()),
-            Some("medium".into()),
             Some("4096".into()),
+            None,
         )
         .unwrap();
         assert_eq!(cfg.temperature, 0.4);
-        assert_eq!(cfg.top_k, 50);
         assert_eq!(cfg.top_p, 0.95);
-        assert_eq!(cfg.reasoning_effort, "medium");
         assert_eq!(cfg.max_tokens, 4096);
         assert!(ConstrainedMediatorConfig::resolve(
             Some("http://x".into()),
@@ -436,9 +427,68 @@ mod tests {
             Some("not-a-number".into()),
             None,
             None,
-            None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn resolve_parses_extra_body_json() {
+        let cfg = ConstrainedMediatorConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(r#"{"reasoning":{"effort":"high"},"top_k":20}"#.into()),
+        )
+        .unwrap();
+        let extra = cfg.extra_body.unwrap();
+        assert_eq!(extra["reasoning"]["effort"], "high");
+        assert_eq!(extra["top_k"], 20);
+        let cfg = ConstrainedMediatorConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("   ".into()),
+        )
+        .unwrap();
+        assert_eq!(cfg.extra_body, None);
+    }
+
+    #[test]
+    fn resolve_rejects_invalid_extra_body_json() {
+        assert!(matches!(
+            ConstrainedMediatorConfig::resolve(
+                Some("http://x".into()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("not-json".into()),
+            ),
+            Err(MediatorError::Config(_))
+        ));
+        assert!(matches!(
+            ConstrainedMediatorConfig::resolve(
+                Some("http://x".into()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(r#"["not","an","object"]"#.into()),
+            ),
+            Err(MediatorError::Config(_))
+        ));
     }
 
     #[test]
@@ -449,10 +499,9 @@ mod tests {
             model: "m".into(),
             timeout_ms: 1000,
             temperature: DEFAULT_TEMPERATURE,
-            top_k: DEFAULT_TOP_K,
             top_p: DEFAULT_TOP_P,
-            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
+            extra_body: None,
         };
         assert_eq!(
             bare.completions_url(),
@@ -491,10 +540,9 @@ mod tests {
             model: "qwen".into(),
             timeout_ms: 1000,
             temperature: DEFAULT_TEMPERATURE,
-            top_k: DEFAULT_TOP_K,
             top_p: DEFAULT_TOP_P,
-            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
+            extra_body: None,
         })
     }
 
@@ -510,8 +558,9 @@ mod tests {
     fn constrained_body_carries_json_schema_and_prompt() {
         let body = test_mediator().request_body(&sample_input(), true);
         assert_eq!(body["model"], "qwen");
-        assert_eq!(body["reasoning"]["effort"], "high");
-        assert_eq!(body["provider"]["sort"], "throughput");
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("provider").is_none());
+        assert!(body.get("top_k").is_none());
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][0]["content"], SYSTEM_PROMPT);
         assert!(body["messages"][1]["content"]
@@ -532,6 +581,23 @@ mod tests {
                 "QUARANTINE"
             ])
         );
+    }
+
+    #[test]
+    fn extra_body_merges_but_cannot_override_standard_fields() {
+        let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(
+            r#"{"reasoning":{"effort":"high"},"provider":{"sort":"throughput"},"top_k":20,"max_tokens":1}"#,
+        )
+        .unwrap();
+        let mediator = ConstrainedMediator::new(ConstrainedMediatorConfig {
+            extra_body: Some(extra),
+            ..test_mediator().config().clone()
+        });
+        let body = mediator.request_body(&sample_input(), true);
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert_eq!(body["provider"]["sort"], "throughput");
+        assert_eq!(body["top_k"], 20);
+        assert_eq!(body["max_tokens"], DEFAULT_MAX_TOKENS);
     }
 
     #[test]
