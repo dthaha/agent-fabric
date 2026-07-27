@@ -1,0 +1,53 @@
+{
+  "id": "dec-034",
+  "category": "contradicts",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-exp-2",
+    "entry_id_a": "e-p3601",
+    "entry_id_b": "e-p3602",
+    "call_a": {
+      "tool_name": "approve_expense",
+      "target": "expense:exp-9902",
+      "params": {
+        "approved": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "approve_expense",
+      "target": "expense:exp-9902",
+      "params": {
+        "approved": false,
+        "reason": "missing receipt"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "approve exp-9902"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "approved"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "reject it actually, there's no receipt attached"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Approve then reject of the same expense."
+}

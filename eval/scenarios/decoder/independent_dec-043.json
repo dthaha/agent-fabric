@@ -1,0 +1,44 @@
+{
+  "id": "dec-043",
+  "category": "independent",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-fin-3",
+    "entry_id_a": "e-h4801",
+    "entry_id_b": "e-h4802",
+    "call_a": {
+      "tool_name": "wire_transfer",
+      "target": "account:ops-3310",
+      "params": {
+        "to": "acct:vendor-221",
+        "amount_usd": 3200,
+        "memo": "Feb hosting"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "wire_transfer",
+      "target": "account:ops-3310",
+      "params": {
+        "to": "acct:vendor-318",
+        "amount_usd": 3200,
+        "memo": "Feb hosting"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "pay both hosting vendors 3200 each for february"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Same amount/memo, different recipients; same source account is not a conflict."
+}

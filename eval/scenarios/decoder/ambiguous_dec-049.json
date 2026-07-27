@@ -1,0 +1,46 @@
+{
+  "id": "dec-049",
+  "category": "ambiguous",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-cal-6",
+    "entry_id_a": "e-b6201",
+    "entry_id_b": "e-b6202",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:partner-sync",
+      "params": {
+        "time": "2026-03-04T13:00"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:partner-sync",
+      "params": {
+        "time": "2026-03-04T15:00"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set up partner sync wednesday 1pm"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "partner sync at 3 wednesday"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "No 'move' language; could be a reschedule or a second recurring instance."
+}

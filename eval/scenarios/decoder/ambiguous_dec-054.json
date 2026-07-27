@@ -1,0 +1,46 @@
+{
+  "id": "dec-054",
+  "category": "ambiguous",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-cal-7",
+    "entry_id_a": "e-g6701",
+    "entry_id_b": "e-g6702",
+    "call_a": {
+      "tool_name": "update_calendar",
+      "target": "meeting:standup",
+      "params": {
+        "time": "2026-03-03T10:00"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:standup",
+      "params": {
+        "time": "2026-03-03T10:00"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[phone, offline] move standup to 10"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[laptop, offline, different city] create standup at 10"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "Two offline surfaces converge on the same time via different verbs; duplicate-meeting risk or same intent."
+}

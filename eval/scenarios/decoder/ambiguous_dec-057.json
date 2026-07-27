@@ -1,0 +1,49 @@
+{
+  "id": "dec-057",
+  "category": "ambiguous",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-iam-3",
+    "entry_id_a": "e-j7001",
+    "entry_id_b": "e-j7002",
+    "call_a": {
+      "tool_name": "grant_access",
+      "target": "user:ksmith@corp.com",
+      "params": {
+        "resource": "jira:PROJ",
+        "role": "viewer"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "grant_access",
+      "target": "user:ksmith@corp.com",
+      "params": {
+        "resource": "jira:PROJ",
+        "role": "viewer",
+        "scope": "project-only"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "give ksmith jira access to PROJ"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "make sure ksmith's PROJ access is project-only viewer"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "Second grant adds a scope qualifier; refinement or restatement unclear."
+}

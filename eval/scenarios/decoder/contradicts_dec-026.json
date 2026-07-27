@@ -1,0 +1,52 @@
+{
+  "id": "dec-026",
+  "category": "contradicts",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-deploy-2",
+    "entry_id_a": "e-h2801",
+    "entry_id_b": "e-h2802",
+    "call_a": {
+      "tool_name": "scale_deployment",
+      "target": "service:worker-pool",
+      "params": {
+        "replicas": 0
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "restart_service",
+      "target": "service:worker-pool",
+      "params": {
+        "strategy": "rolling"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "scale worker-pool to zero, we're draining the queue"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "scaled to 0"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "restart worker-pool"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Restarting a service scaled to zero conflicts with the drain intent."
+}

@@ -1,0 +1,40 @@
+{
+  "id": "dec-038",
+  "category": "independent",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-doc-2",
+    "entry_id_a": "e-c4301",
+    "entry_id_b": "e-c4302",
+    "call_a": {
+      "tool_name": "create_file",
+      "target": "repo:docs/api.md",
+      "params": {
+        "content": "# API Reference"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_file",
+      "target": "repo:docs/cli.md",
+      "params": {
+        "content": "# CLI Reference"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "create stub docs for the api and the cli"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.8,
+    "max_confidence": 1.0
+  },
+  "notes": "Two different file paths created in one request."
+}

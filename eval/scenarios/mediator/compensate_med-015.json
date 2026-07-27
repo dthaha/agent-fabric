@@ -1,0 +1,70 @@
+{
+  "id": "med-015",
+  "category": "compensate",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "book_flight"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "trip:vegas"
+        }
+      ],
+      "confidence": 0.87,
+      "explanation": "date revised post-ticketing"
+    },
+    "session_id": "s-trip-22",
+    "entry_id_a": "e-d231",
+    "entry_id_b": "e-d232",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:vegas",
+      "params": {
+        "date": "2026-04-03",
+        "ticketed": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:vegas",
+      "params": {
+        "date": "2026-04-04"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book vegas april 3"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "ticketed, confirmation UA-8812"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "ugh I meant the 4th"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-d232",
+    "min_confidence": 0.6,
+    "max_confidence": 0.85
+  },
+  "notes": "Already ticketed; cancel/refund the 4/3 ticket then book 4/4."
+}

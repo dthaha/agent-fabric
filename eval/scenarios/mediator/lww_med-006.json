@@ -1,0 +1,69 @@
+{
+  "id": "med-006",
+  "category": "lww",
+  "difficulty": "easy",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "set_config"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "service:api"
+        },
+        {
+          "entity_type": "param",
+          "entity_id": "rate_limit_rpm"
+        }
+      ],
+      "confidence": 0.95,
+      "explanation": "value raised"
+    },
+    "session_id": "s-cfg-20",
+    "entry_id_a": "e-f601",
+    "entry_id_b": "e-f602",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:api",
+      "params": {
+        "key": "rate_limit_rpm",
+        "value": "1000"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:api",
+      "params": {
+        "key": "rate_limit_rpm",
+        "value": "2000"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "rate limit 1000"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "bump to 2000, batch job throttled"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-f602",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Config value revision; B wins."
+}

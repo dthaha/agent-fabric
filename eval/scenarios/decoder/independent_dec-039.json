@@ -1,0 +1,40 @@
+{
+  "id": "dec-039",
+  "category": "independent",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-home-9",
+    "entry_id_a": "e-d4401",
+    "entry_id_b": "e-d4402",
+    "call_a": {
+      "tool_name": "lock_door",
+      "target": "home:front-door",
+      "params": {
+        "locked": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "lock_door",
+      "target": "home:back-door",
+      "params": {
+        "locked": true
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "lock the front and back doors"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.8,
+    "max_confidence": 1.0
+  },
+  "notes": "Same state on two different locks."
+}

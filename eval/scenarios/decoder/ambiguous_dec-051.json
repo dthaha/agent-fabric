@@ -1,0 +1,33 @@
+{
+  "id": "dec-051",
+  "category": "ambiguous",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-doc-3",
+    "entry_id_a": "e-d6401",
+    "entry_id_b": "e-d6402",
+    "call_a": {
+      "tool_name": "create_file",
+      "target": "repo:README.md",
+      "params": {
+        "content": "# Project\nBuild with make."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_file",
+      "target": "repo:README.md",
+      "params": {
+        "content": "# Project\nBuild with make. Test with make test."
+      },
+      "idempotency_key": ""
+    },
+    "context": []
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "No context; second write could be an append-style revision or an accidental overwrite from another session."
+}

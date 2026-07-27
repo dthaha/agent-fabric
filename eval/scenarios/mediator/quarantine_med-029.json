@@ -1,0 +1,63 @@
+{
+  "id": "med-029",
+  "category": "quarantine",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "deploy_service"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "service:payments:prod"
+        }
+      ],
+      "confidence": 0.8,
+      "explanation": "two different versions for prod payments"
+    },
+    "session_id": "s-deploy-21",
+    "entry_id_a": "e-c421",
+    "entry_id_b": "e-c422",
+    "call_a": {
+      "tool_name": "deploy_service",
+      "target": "service:payments:prod",
+      "params": {
+        "version": "6.0.0"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "deploy_service",
+      "target": "service:payments:prod",
+      "params": {
+        "version": "5.9.8-hotfix"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "promote payments 6.0.0 to prod"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "push the 5.9.8 hotfix to prod"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "QUARANTINE",
+    "winning_entry_id": null,
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Irreversible-ish prod payment deploy with version ambiguity; hold both."
+}

@@ -1,0 +1,56 @@
+{
+  "id": "dec-032",
+  "category": "contradicts",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-fin-2",
+    "entry_id_a": "e-n3401",
+    "entry_id_b": "e-n3402",
+    "call_a": {
+      "tool_name": "wire_transfer",
+      "target": "account:ops-3310",
+      "params": {
+        "to": "acct:landlord-09",
+        "amount_usd": 8500,
+        "memo": "March rent"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "wire_transfer",
+      "target": "account:ops-3310",
+      "params": {
+        "to": "acct:landlord-09",
+        "amount_usd": 9200,
+        "memo": "March rent"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "wire march rent, 8500, to the landlord account"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "queued"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "the lease says 9200 with the parking add-on"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Same memo/recipient but two different amounts; ambiguous-looking but paying both would double-pay, so intents conflict."
+}

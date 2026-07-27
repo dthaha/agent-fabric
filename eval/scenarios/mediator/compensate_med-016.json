@@ -1,0 +1,70 @@
+{
+  "id": "med-016",
+  "category": "compensate",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "schedule_meeting"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "meeting:team-offsite"
+        }
+      ],
+      "confidence": 0.89,
+      "explanation": "date moved after invites sent"
+    },
+    "session_id": "s-cal-22",
+    "entry_id_a": "e-e241",
+    "entry_id_b": "e-e242",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:team-offsite",
+      "params": {
+        "time": "2026-03-12T09:00",
+        "invites_sent": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:team-offsite",
+      "params": {
+        "time": "2026-03-13T09:00"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "offsite march 12 at 9"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "invites sent to 24 people"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "venue double-booked, move to the 13th"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-e242",
+    "min_confidence": 0.7,
+    "max_confidence": 0.9
+  },
+  "notes": "Invites already out; send update/cancellation for the 12th and re-invite for the 13th."
+}

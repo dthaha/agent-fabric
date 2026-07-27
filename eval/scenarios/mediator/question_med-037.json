@@ -1,0 +1,65 @@
+{
+  "id": "med-037",
+  "category": "question",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "set_config"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "service:db-proxy"
+        }
+      ],
+      "confidence": 0.5,
+      "explanation": "user may conflate timeout keys"
+    },
+    "session_id": "s-cfg-22",
+    "entry_id_a": "e-e541",
+    "entry_id_b": "e-e542",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:db-proxy",
+      "params": {
+        "key": "timeout_ms",
+        "value": "2000"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:db-proxy",
+      "params": {
+        "key": "read_timeout_ms",
+        "value": "2000"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set db proxy timeout to 2s"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set read timeout to 2s"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "question",
+    "resolution": null,
+    "winning_entry_id": null,
+    "min_confidence": 0.0,
+    "max_confidence": 0.6
+  },
+  "notes": "Ask whether they meant one key or both."
+}

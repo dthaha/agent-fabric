@@ -1,0 +1,42 @@
+{
+  "id": "dec-037",
+  "category": "independent",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-mail-3",
+    "entry_id_a": "e-b4201",
+    "entry_id_b": "e-b4202",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:alice@corp.com",
+      "params": {
+        "subject": "Sprint review notes",
+        "body": "Notes attached."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:bob@corp.com",
+      "params": {
+        "subject": "Sprint review notes",
+        "body": "Notes attached."
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "send the sprint notes to alice and bob"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.8,
+    "max_confidence": 1.0
+  },
+  "notes": "Same content to two different recipients."
+}

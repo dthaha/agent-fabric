@@ -1,0 +1,47 @@
+{
+  "id": "dec-072",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-chat-1",
+    "entry_id_a": "e-m9301",
+    "entry_id_b": "e-m9302",
+    "call_a": {
+      "tool_name": "archive_channel",
+      "target": "chat:#launch-war-room",
+      "params": {
+        "reason": "launch complete"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "archive_channel",
+      "target": "chat:#launch-war-room",
+      "params": {
+        "reason": "recreate needed",
+        "recreate": true
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "archive the war room, launch is done"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "archive it and spin up a fresh one for the hotfix"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.5,
+    "max_confidence": 0.85
+  },
+  "notes": "Recreate-on-archive contradicts plain archive semantics for the same channel; near-miss that looks like refinement."
+}

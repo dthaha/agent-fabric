@@ -1,0 +1,71 @@
+{
+  "id": "med-002",
+  "category": "lww",
+  "difficulty": "easy",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "book_flight"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "trip:denver"
+        }
+      ],
+      "confidence": 0.96,
+      "explanation": "2pm booking revises 9am for same trip"
+    },
+    "session_id": "s-trip-20",
+    "entry_id_a": "e-b201",
+    "entry_id_b": "e-b202",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:denver",
+      "params": {
+        "departure": "09:00",
+        "date": "2026-03-01"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:denver",
+      "params": {
+        "departure": "14:00",
+        "date": "2026-03-01"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book the 9am denver flight"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "booked"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "meeting moved, 2pm instead"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-b202",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Explicit 'instead' revision; B wins."
+}

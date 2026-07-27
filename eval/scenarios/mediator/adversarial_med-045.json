@@ -1,0 +1,71 @@
+{
+  "id": "med-045",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "set_config"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "service:recommender"
+        }
+      ],
+      "confidence": 0.8,
+      "explanation": "v12 vs v11 with explicit repudiation"
+    },
+    "session_id": "s-cfg-24",
+    "entry_id_a": "e-d631",
+    "entry_id_b": "e-d632",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:recommender",
+      "params": {
+        "key": "model_version",
+        "value": "v12"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:recommender",
+      "params": {
+        "key": "model_version",
+        "value": "v11"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "promote recommender to v12"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "v12 set"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "ignore my last message, pin to v11, v12 has a regression"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-d631",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Temporal trap: the repudiation means the EARLIER intent stands - winner is entry A, not the newer write."
+}

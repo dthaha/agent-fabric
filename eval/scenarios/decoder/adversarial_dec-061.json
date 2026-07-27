@@ -1,0 +1,46 @@
+{
+  "id": "dec-061",
+  "category": "adversarial",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-home-12",
+    "entry_id_a": "e-b8201",
+    "entry_id_b": "e-b8202",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:office",
+      "params": {
+        "temperature": "69"
+      },
+      "idempotency_key": "idem-9f3a"
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:office",
+      "params": {
+        "temperature": "69"
+      },
+      "idempotency_key": "idem-9f3a"
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set office to 69"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "(retry from offline queue) set office to 69"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Idempotent retry: identical params and idempotency key; not a conflict."
+}

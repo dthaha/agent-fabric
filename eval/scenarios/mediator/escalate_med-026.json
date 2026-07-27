@@ -1,0 +1,61 @@
+{
+  "id": "med-026",
+  "category": "escalate",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "target",
+          "entity_id": "service:payments"
+        }
+      ],
+      "confidence": 0.72,
+      "explanation": "scheduled deploy vs incident rollback crossed offline"
+    },
+    "session_id": "s-deploy-20",
+    "entry_id_a": "e-f351",
+    "entry_id_b": "e-f352",
+    "call_a": {
+      "tool_name": "deploy_service",
+      "target": "service:payments",
+      "params": {
+        "version": "5.1.0",
+        "requested_by": "release-train"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "rollback_release",
+      "target": "service:payments",
+      "params": {
+        "to_version": "5.0.3",
+        "requested_by": "oncall"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[release train] deploy payments 5.1.0 as scheduled"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[oncall, offline during incident] roll payments back, seeing elevated 5xx"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "ESCALATE",
+    "winning_entry_id": null,
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Deploy and rollback crossed while oncall was offline; both plausible, high blast radius - page a human."
+}

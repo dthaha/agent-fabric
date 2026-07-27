@@ -1,0 +1,54 @@
+{
+  "id": "dec-002",
+  "category": "supersedes",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-home-2",
+    "entry_id_a": "e-b201",
+    "entry_id_b": "e-b202",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:bedroom",
+      "params": {
+        "temperature": "70",
+        "schedule": "night"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:bedroom",
+      "params": {
+        "temperature": "66",
+        "schedule": "night"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set the bedroom night schedule to 70"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "night schedule set to 70"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "hmm, drop the night temp to 66, we run hot"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Schedule-qualified revision; same target and schedule param."
+}

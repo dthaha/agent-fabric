@@ -1,0 +1,63 @@
+{
+  "id": "med-005",
+  "category": "lww",
+  "difficulty": "easy",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "schedule_meeting"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "meeting:design-sync"
+        }
+      ],
+      "confidence": 0.95,
+      "explanation": "time moved"
+    },
+    "session_id": "s-cal-20",
+    "entry_id_a": "e-e501",
+    "entry_id_b": "e-e502",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:design-sync",
+      "params": {
+        "time": "2026-03-02T10:00"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:design-sync",
+      "params": {
+        "time": "2026-03-02T11:00"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "design sync at 10"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "move it to 11"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-e502",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Standard move; B wins."
+}

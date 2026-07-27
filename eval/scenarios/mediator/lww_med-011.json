@@ -1,0 +1,71 @@
+{
+  "id": "med-011",
+  "category": "lww",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "book_flight"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "trip:reno"
+        }
+      ],
+      "confidence": 0.9,
+      "explanation": "seat preference changed on held booking"
+    },
+    "session_id": "s-trip-21",
+    "entry_id_a": "e-k1101",
+    "entry_id_b": "e-k1102",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:reno",
+      "params": {
+        "date": "2026-05-01",
+        "seat": "window"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:reno",
+      "params": {
+        "date": "2026-05-01",
+        "seat": "aisle"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book reno may 1, window seat"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "held, not ticketed"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "aisle actually, I need to get up a lot"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-k1102",
+    "min_confidence": 0.7,
+    "max_confidence": 0.9
+  },
+  "notes": "Booking only held, not ticketed; seat change is safe LWW."
+}

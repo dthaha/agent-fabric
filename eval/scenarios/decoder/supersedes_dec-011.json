@@ -1,0 +1,58 @@
+{
+  "id": "dec-011",
+  "category": "supersedes",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-dns-1",
+    "entry_id_a": "e-k1101",
+    "entry_id_b": "e-k1102",
+    "call_a": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "api",
+        "type": "A",
+        "value": "10.0.0.5",
+        "ttl": 300
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "api",
+        "type": "A",
+        "value": "10.0.0.5",
+        "ttl": 3600
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "point api.example.com at 10.0.0.5, ttl 300"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "record updated"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "actually raise the ttl to an hour, the IP is stable now"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Same record/value, TTL revised."
+}

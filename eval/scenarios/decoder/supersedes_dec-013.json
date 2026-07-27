@@ -1,0 +1,54 @@
+{
+  "id": "dec-013",
+  "category": "supersedes",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-exp-1",
+    "entry_id_a": "e-m1301",
+    "entry_id_b": "e-m1302",
+    "call_a": {
+      "tool_name": "approve_expense",
+      "target": "expense:exp-8841",
+      "params": {
+        "approved": true,
+        "amount_usd": 320
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "approve_expense",
+      "target": "expense:exp-8841",
+      "params": {
+        "approved": true,
+        "amount_usd": 280
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "approve exp-8841, $320 for the team dinner"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "approved $320"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "finance flagged the tip, only approve 280"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Approval amount revised downward after policy flag; still an approval."
+}

@@ -1,0 +1,65 @@
+{
+  "id": "med-009",
+  "category": "lww",
+  "difficulty": "easy",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "set_config"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "home:lighting"
+        }
+      ],
+      "confidence": 0.96,
+      "explanation": "brightness revised"
+    },
+    "session_id": "s-home-21",
+    "entry_id_a": "e-i901",
+    "entry_id_b": "e-i902",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "home:lighting",
+      "params": {
+        "key": "porch_brightness",
+        "value": "40"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "home:lighting",
+      "params": {
+        "key": "porch_brightness",
+        "value": "70"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "porch lights 40 percent"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "brighter, 70"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-i902",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Simple revision; B wins."
+}

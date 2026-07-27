@@ -1,0 +1,63 @@
+{
+  "id": "med-021",
+  "category": "escalate",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "set_thermostat"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "home:living-room"
+        }
+      ],
+      "confidence": 0.55,
+      "explanation": "two household members set different temps 3 min apart"
+    },
+    "session_id": "s-home-22",
+    "entry_id_a": "e-a301",
+    "entry_id_b": "e-a302",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {
+        "temperature": "70"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {
+        "temperature": "74"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[user A phone, 18:02] living room 70"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[user B tablet, 18:05] living room 74"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "ESCALATE",
+    "winning_entry_id": null,
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Two users, conflicting preferences, no revision language; cannot pick a winner."
+}

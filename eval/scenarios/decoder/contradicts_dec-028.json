@@ -1,0 +1,60 @@
+{
+  "id": "dec-028",
+  "category": "contradicts",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-trip-4",
+    "entry_id_a": "e-j3001",
+    "entry_id_b": "e-j3002",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:nyc-site-visit",
+      "params": {
+        "date": "2026-03-15",
+        "departure": "08:00"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:nyc-site-visit",
+      "params": {
+        "date": "2026-03-16",
+        "departure": "08:00"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book me to NYC for the site visit, morning flight"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "which date?"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "the 15th"
+      },
+      {
+        "entry_id": "u-4",
+        "seq": 4,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "wait no - the site confirmed the 16th"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Two different single dates for the same one-day visit; user cannot fly both. Looks like a revision but dates are mutually exclusive given a fixed site appointment."
+}

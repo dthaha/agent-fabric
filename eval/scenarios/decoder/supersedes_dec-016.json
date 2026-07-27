@@ -1,0 +1,54 @@
+{
+  "id": "dec-016",
+  "category": "supersedes",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-iam-1",
+    "entry_id_a": "e-p1601",
+    "entry_id_b": "e-p1602",
+    "call_a": {
+      "tool_name": "grant_access",
+      "target": "user:jdoe@corp.com",
+      "params": {
+        "resource": "s3://analytics-exports",
+        "role": "viewer"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "grant_access",
+      "target": "user:jdoe@corp.com",
+      "params": {
+        "resource": "s3://analytics-exports",
+        "role": "editor"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "give jdoe viewer access to the analytics bucket"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "viewer granted"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "he needs to upload reports too, make it editor"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Role escalation on same user/resource pair."
+}

@@ -1,0 +1,54 @@
+{
+  "id": "dec-005",
+  "category": "supersedes",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-mail-1",
+    "entry_id_a": "e-e501",
+    "entry_id_b": "e-e502",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:finance@acme.com",
+      "params": {
+        "subject": "Q3 invoice",
+        "body": "Attached is the Q3 invoice."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:finance@acme.com",
+      "params": {
+        "subject": "Q3 invoice - revised",
+        "body": "Attached is the corrected Q3 invoice."
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "send the Q3 invoice to acme finance"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "draft ready"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "wait, mark it revised, I fixed the line items"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Email redrafted before send; same recipient, corrected content."
+}

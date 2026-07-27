@@ -1,0 +1,67 @@
+{
+  "id": "med-014",
+  "category": "compensate",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "send_email"
+        }
+      ],
+      "confidence": 0.9,
+      "explanation": "sent to wrong recipient, intended finance@"
+    },
+    "session_id": "s-mail-21",
+    "entry_id_a": "e-c221",
+    "entry_id_b": "e-c222",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:wrong@example.com",
+      "params": {
+        "subject": "Q3 numbers",
+        "body": "Attached are the Q3 numbers."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:finance@example.com",
+      "params": {
+        "subject": "Q3 numbers",
+        "body": "Attached are the Q3 numbers."
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "email the Q3 numbers to finance"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "sent to wrong@example.com - autocomplete picked the wrong contact"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "that's the wrong person!"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-c222",
+    "min_confidence": 0.7,
+    "max_confidence": 0.9
+  },
+  "notes": "Send recall/follow-up to wrong recipient plus send to correct one; undo + redo."
+}

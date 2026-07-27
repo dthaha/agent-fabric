@@ -1,0 +1,59 @@
+{
+  "id": "med-040",
+  "category": "question",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "target",
+          "entity_id": "meeting:standup"
+        }
+      ],
+      "confidence": 0.5,
+      "explanation": "move vs create from two offline surfaces"
+    },
+    "session_id": "s-cal-25",
+    "entry_id_a": "e-h571",
+    "entry_id_b": "e-h572",
+    "call_a": {
+      "tool_name": "update_calendar",
+      "target": "meeting:standup",
+      "params": {
+        "time": "2026-03-03T10:00"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:standup",
+      "params": {
+        "time": "2026-03-03T10:00"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[phone, offline] move standup to 10"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[laptop, offline] create standup at 10"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "question",
+    "resolution": null,
+    "winning_entry_id": null,
+    "min_confidence": 0.0,
+    "max_confidence": 0.6
+  },
+  "notes": "Same time via different verbs; ask to avoid a duplicate meeting."
+}

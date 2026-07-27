@@ -1,0 +1,65 @@
+{
+  "id": "med-038",
+  "category": "question",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "create_invoice"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "client:umbrella"
+        }
+      ],
+      "confidence": 0.5,
+      "explanation": "due-date correction or second invoice"
+    },
+    "session_id": "s-inv-22",
+    "entry_id_a": "e-f551",
+    "entry_id_b": "e-f552",
+    "call_a": {
+      "tool_name": "create_invoice",
+      "target": "client:umbrella",
+      "params": {
+        "amount_usd": 5000,
+        "due_date": "2026-04-01"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_invoice",
+      "target": "client:umbrella",
+      "params": {
+        "amount_usd": 5000,
+        "due_date": "2026-04-15"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "invoice umbrella 5k due april 1"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "invoice umbrella 5k due april 15"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "question",
+    "resolution": null,
+    "winning_entry_id": null,
+    "min_confidence": 0.0,
+    "max_confidence": 0.6
+  },
+  "notes": "Duplicate-amount invoices differ only in due date; ask which is right."
+}

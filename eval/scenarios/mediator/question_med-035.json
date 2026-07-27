@@ -1,0 +1,59 @@
+{
+  "id": "med-035",
+  "category": "question",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "target",
+          "entity_id": "meeting:partner-sync"
+        }
+      ],
+      "confidence": 0.5,
+      "explanation": "move vs second instance unclear"
+    },
+    "session_id": "s-cal-24",
+    "entry_id_a": "e-c521",
+    "entry_id_b": "e-c522",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:partner-sync",
+      "params": {
+        "time": "2026-03-04T13:00"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:partner-sync",
+      "params": {
+        "time": "2026-03-04T15:00"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "partner sync wed 1pm"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "partner sync at 3 wednesday"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "question",
+    "resolution": null,
+    "winning_entry_id": null,
+    "min_confidence": 0.0,
+    "max_confidence": 0.6
+  },
+  "notes": "Ask whether to move the 1pm or create a second sync."
+}

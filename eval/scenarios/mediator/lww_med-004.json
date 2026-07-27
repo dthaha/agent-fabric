@@ -1,0 +1,71 @@
+{
+  "id": "med-004",
+  "category": "lww",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "send_email"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "contact:team@corp.com"
+        }
+      ],
+      "confidence": 0.93,
+      "explanation": "draft corrected before send"
+    },
+    "session_id": "s-mail-20",
+    "entry_id_a": "e-d401",
+    "entry_id_b": "e-d402",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:team@corp.com",
+      "params": {
+        "subject": "Launch Friday",
+        "body": "Launch is friday."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:team@corp.com",
+      "params": {
+        "subject": "Launch moved to Monday",
+        "body": "Launch moved to monday."
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "tell the team launch is friday"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "drafted, not sent"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "hold on, launch moved to monday"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-d402",
+    "min_confidence": 0.8,
+    "max_confidence": 0.95
+  },
+  "notes": "Draft never sent; corrected version wins cleanly."
+}

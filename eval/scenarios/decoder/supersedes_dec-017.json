@@ -1,0 +1,54 @@
+{
+  "id": "dec-017",
+  "category": "supersedes",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-trip-2",
+    "entry_id_a": "e-q1701",
+    "entry_id_b": "e-q1702",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:austin-conf",
+      "params": {
+        "date": "2026-04-10",
+        "return": "2026-04-12"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:austin-conf",
+      "params": {
+        "date": "2026-04-11",
+        "return": "2026-04-13"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book austin for the conference, fly out the 10th back the 12th"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "booked 4/10-4/12"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "conference got pushed a day, shift everything"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Whole itinerary shifted; both dates revised together."
+}

@@ -1,0 +1,61 @@
+{
+  "id": "med-022",
+  "category": "escalate",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "target",
+          "entity_id": "meeting:budget-review"
+        }
+      ],
+      "confidence": 0.5,
+      "explanation": "co-organizers issued conflicting times from different surfaces"
+    },
+    "session_id": "s-cal-23",
+    "entry_id_a": "e-b311",
+    "entry_id_b": "e-b312",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:budget-review",
+      "params": {
+        "time": "2026-03-09T10:00",
+        "organizer": "alice"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "update_calendar",
+      "target": "meeting:budget-review",
+      "params": {
+        "time": "2026-03-09T14:00",
+        "organizer": "bob"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[from alice's laptop] budget review monday 10am"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[from bob's phone, offline until sync] move budget review to 2pm"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "ESCALATE",
+    "winning_entry_id": null,
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Both organizers have authority; context cannot disambiguate."
+}

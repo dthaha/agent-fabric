@@ -1,0 +1,52 @@
+{
+  "id": "dec-022",
+  "category": "contradicts",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-rel-1",
+    "entry_id_a": "e-d2401",
+    "entry_id_b": "e-d2402",
+    "call_a": {
+      "tool_name": "deploy_service",
+      "target": "service:billing",
+      "params": {
+        "version": "2.4.0"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "rollback_release",
+      "target": "service:billing",
+      "params": {
+        "to_version": "2.3.1"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "deploy billing 2.4.0"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "deployment started"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "roll billing back to 2.3.1, error rate spiked"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Deploy and rollback on same service cannot both stand."
+}

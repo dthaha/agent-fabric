@@ -1,0 +1,53 @@
+{
+  "id": "dec-035",
+  "category": "contradicts",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-sec-1",
+    "entry_id_a": "e-q3701",
+    "entry_id_b": "e-q3702",
+    "call_a": {
+      "tool_name": "rotate_credentials",
+      "target": "service:payments",
+      "params": {
+        "key": "stripe_api"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:payments",
+      "params": {
+        "key": "stripe_api_token_ttl",
+        "value": "7776000"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "rotate the stripe key for payments"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "rotation scheduled"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set the stripe token ttl to 90 days so we don't have to rotate often"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Active rotation conflicts with extending token lifetime to avoid rotation; opposing security postures on the same credential."
+}

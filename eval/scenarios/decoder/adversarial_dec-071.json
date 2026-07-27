@@ -1,0 +1,47 @@
+{
+  "id": "dec-071",
+  "category": "adversarial",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-fin-5",
+    "entry_id_a": "e-l9201",
+    "entry_id_b": "e-l9202",
+    "call_a": {
+      "tool_name": "freeze_account",
+      "target": "account:chk-7741",
+      "params": {
+        "reason": "card stolen"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "approve_expense",
+      "target": "account:chk-7741",
+      "params": {
+        "expense": "exp-1207",
+        "approved": true
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "freeze 7741, my card was stolen"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "approve the pending expense on 7741"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Cross-tool conflict: approving spend on a frozen account contradicts the freeze."
+}

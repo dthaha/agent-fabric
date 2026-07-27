@@ -1,0 +1,40 @@
+{
+  "id": "dec-036",
+  "category": "independent",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-home-8",
+    "entry_id_a": "e-a4101",
+    "entry_id_b": "e-a4102",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {
+        "temperature": "71"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:bedroom",
+      "params": {
+        "temperature": "65"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "living room 71, bedroom 65 for the night"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.8,
+    "max_confidence": 1.0
+  },
+  "notes": "Same tool, different targets; classic structural false positive."
+}

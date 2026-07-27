@@ -1,0 +1,63 @@
+{
+  "id": "med-033",
+  "category": "question",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "set_thermostat"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "home:living-room"
+        }
+      ],
+      "confidence": 0.5,
+      "explanation": "two temps 13h apart, no revision language"
+    },
+    "session_id": "s-home-23",
+    "entry_id_a": "e-a501",
+    "entry_id_b": "e-a502",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {
+        "temperature": "70"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {
+        "temperature": "73"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[phone, 07:55] living room 70"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[laptop, 21:30] living room 73"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "question",
+    "resolution": null,
+    "winning_entry_id": null,
+    "min_confidence": 0.0,
+    "max_confidence": 0.6
+  },
+  "notes": "No signal whether B is a change of mind; ask which temp stands."
+}

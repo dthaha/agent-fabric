@@ -1,0 +1,46 @@
+{
+  "id": "dec-069",
+  "category": "adversarial",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-home-14",
+    "entry_id_a": "e-j9001",
+    "entry_id_b": "e-j9002",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:guest-room",
+      "params": {
+        "temperature": "72"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:guest-room",
+      "params": {
+        "temperature": "72"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "guest room 72"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "guest room 72"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.75,
+    "max_confidence": 1.0
+  },
+  "notes": "Identical duplicate call; no conflict even without idempotency keys."
+}

@@ -1,0 +1,54 @@
+{
+  "id": "dec-030",
+  "category": "contradicts",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-mail-2",
+    "entry_id_a": "e-l3201",
+    "entry_id_b": "e-l3202",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:client@wayne.com",
+      "params": {
+        "subject": "Contract countersigned",
+        "body": "Please find the countersigned contract attached."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:client@wayne.com",
+      "params": {
+        "subject": "RE: Contract - hold off",
+        "body": "Please disregard the previous contract, terms are being reworked."
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "send wayne the countersigned contract"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "sent"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "tell them to disregard it, legal wants to rework terms"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Second email instructs disregarding the first; content-level contradiction, not a redraft."
+}

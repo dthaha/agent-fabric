@@ -1,0 +1,54 @@
+{
+  "id": "dec-003",
+  "category": "supersedes",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-trip-1",
+    "entry_id_a": "e-c301",
+    "entry_id_b": "e-c302",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:denver-2026-03",
+      "params": {
+        "departure": "09:00",
+        "date": "2026-03-01"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:denver-2026-03",
+      "params": {
+        "departure": "14:00",
+        "date": "2026-03-01"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book the 9am flight to denver"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "booked, DL-4410"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "my meeting moved - get me on the 2pm one instead"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Same trip target, departure time revised with 'instead'."
+}

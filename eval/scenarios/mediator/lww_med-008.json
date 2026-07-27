@@ -1,0 +1,65 @@
+{
+  "id": "med-008",
+  "category": "lww",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "create_invoice"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "client:globex"
+        }
+      ],
+      "confidence": 0.91,
+      "explanation": "amount corrected on draft"
+    },
+    "session_id": "s-inv-20",
+    "entry_id_a": "e-h801",
+    "entry_id_b": "e-h802",
+    "call_a": {
+      "tool_name": "create_invoice",
+      "target": "client:globex",
+      "params": {
+        "amount_usd": 4200,
+        "status": "draft"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_invoice",
+      "target": "client:globex",
+      "params": {
+        "amount_usd": 4600,
+        "status": "draft"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "draft globex invoice 4200"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "add the support fee, 4600"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-h802",
+    "min_confidence": 0.75,
+    "max_confidence": 0.95
+  },
+  "notes": "Draft not yet issued; safe to take newest."
+}

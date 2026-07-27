@@ -1,0 +1,54 @@
+{
+  "id": "dec-015",
+  "category": "supersedes",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-home-4",
+    "entry_id_a": "e-o1501",
+    "entry_id_b": "e-o1502",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "home:lighting",
+      "params": {
+        "key": "living_room_brightness",
+        "value": "60"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "home:lighting",
+      "params": {
+        "key": "living_room_brightness",
+        "value": "80"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set living room lights to 60 percent"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "set to 60%"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "brighter, 80"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Brightness revision, terse follow-up."
+}

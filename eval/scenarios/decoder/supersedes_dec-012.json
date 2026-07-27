@@ -1,0 +1,54 @@
+{
+  "id": "dec-012",
+  "category": "supersedes",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-cal-2",
+    "entry_id_a": "e-l1201",
+    "entry_id_b": "e-l1202",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:qbr-prep",
+      "params": {
+        "title": "QBR Prep",
+        "time": "2026-03-05T14:00"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:qbr-prep",
+      "params": {
+        "title": "QBR Prep - Globex",
+        "time": "2026-03-05T14:00"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set up QBR prep thursday at 2"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "scheduled 'QBR Prep'"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "rename it to QBR Prep - Globex so folks know which client"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Title revision only; same time and meeting."
+}

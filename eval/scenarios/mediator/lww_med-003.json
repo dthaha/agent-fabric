@@ -1,0 +1,63 @@
+{
+  "id": "med-003",
+  "category": "lww",
+  "difficulty": "easy",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "create_file"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "repo:notes/todo.md"
+        }
+      ],
+      "confidence": 0.94,
+      "explanation": "B extends the same file"
+    },
+    "session_id": "s-doc-20",
+    "entry_id_a": "e-c301",
+    "entry_id_b": "e-c302",
+    "call_a": {
+      "tool_name": "create_file",
+      "target": "repo:notes/todo.md",
+      "params": {
+        "content": "- buy milk"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_file",
+      "target": "repo:notes/todo.md",
+      "params": {
+        "content": "- buy milk\n- call dentist"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "start a todo list with buy milk"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "add call dentist"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-c302",
+    "min_confidence": 0.8,
+    "max_confidence": 1.0
+  },
+  "notes": "Additive file revision; newest content stands."
+}

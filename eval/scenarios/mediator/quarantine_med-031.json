@@ -1,0 +1,61 @@
+{
+  "id": "med-031",
+  "category": "quarantine",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "target",
+          "entity_id": "feature/payments-v2"
+        }
+      ],
+      "confidence": 0.85,
+      "explanation": "force-delete vs merge of payments branch"
+    },
+    "session_id": "s-git-20",
+    "entry_id_a": "e-e441",
+    "entry_id_b": "e-e442",
+    "call_a": {
+      "tool_name": "delete_branch",
+      "target": "repo:webapp",
+      "params": {
+        "branch": "feature/payments-v2",
+        "force": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "merge_pr",
+      "target": "repo:webapp",
+      "params": {
+        "pr": 512,
+        "branch": "feature/payments-v2"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "force delete payments-v2, we're abandoning it"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[teammate's laptop, offline] merge PR 512 (payments-v2)"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "QUARANTINE",
+    "winning_entry_id": null,
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Force-delete of unmerged payment code is irreversible; hold both until owners confirm."
+}

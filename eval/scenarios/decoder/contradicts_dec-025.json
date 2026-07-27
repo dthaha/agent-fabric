@@ -1,0 +1,52 @@
+{
+  "id": "dec-025",
+  "category": "contradicts",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-cal-4",
+    "entry_id_a": "e-g2701",
+    "entry_id_b": "e-g2702",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:board-review",
+      "params": {
+        "time": "2026-03-10T15:00"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "update_calendar",
+      "target": "meeting:board-review",
+      "params": {
+        "cancelled": true
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "schedule board review for the 10th at 3"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "scheduled"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "cancel the board review, quorum fell through"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Schedule then cancel of the same meeting."
+}

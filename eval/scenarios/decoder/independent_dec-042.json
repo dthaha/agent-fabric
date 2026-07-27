@@ -1,0 +1,40 @@
+{
+  "id": "dec-042",
+  "category": "independent",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-deploy-3",
+    "entry_id_a": "e-g4701",
+    "entry_id_b": "e-g4702",
+    "call_a": {
+      "tool_name": "deploy_service",
+      "target": "service:auth",
+      "params": {
+        "version": "1.9.2"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "deploy_service",
+      "target": "service:search",
+      "params": {
+        "version": "3.1.0"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "deploy auth 1.9.2 and search 3.1.0"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.8,
+    "max_confidence": 1.0
+  },
+  "notes": "Different services, different versions."
+}

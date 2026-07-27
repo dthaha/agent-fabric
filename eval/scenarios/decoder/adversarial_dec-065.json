@@ -1,0 +1,46 @@
+{
+  "id": "dec-065",
+  "category": "adversarial",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-home-13",
+    "entry_id_a": "e-f8601",
+    "entry_id_b": "e-f8602",
+    "call_a": {
+      "tool_name": "lock_door",
+      "target": "home:patio",
+      "params": {
+        "locked": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "lock_door",
+      "target": "home:patio",
+      "params": {
+        "locked": false
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "lock the patio door"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "lock the patio door - wait I mean unlock it"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Same tool used for opposite states with self-correction; final intent is unlock but both calls issued."
+}

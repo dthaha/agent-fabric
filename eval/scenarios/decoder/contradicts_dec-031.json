@@ -1,0 +1,59 @@
+{
+  "id": "dec-031",
+  "category": "contradicts",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-git-1",
+    "entry_id_a": "e-m3301",
+    "entry_id_b": "e-m3302",
+    "call_a": {
+      "tool_name": "merge_pr",
+      "target": "repo:webapp",
+      "params": {
+        "pr": 418
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "delete_branch",
+      "target": "repo:webapp",
+      "params": {
+        "branch": "feature/new-checkout",
+        "force": true
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "merge PR 418"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "PR 418 (feature/new-checkout) is open, checks running"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "delete the new-checkout branch"
+      },
+      {
+        "entry_id": "u-4",
+        "seq": 4,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "and force it, I don't care about the warnings"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Force-deleting the source branch of an open PR slated for merge destroys the merge target."
+}

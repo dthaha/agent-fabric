@@ -1,0 +1,69 @@
+{
+  "id": "med-024",
+  "category": "escalate",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "update_dns"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "zone:example.com"
+        }
+      ],
+      "confidence": 0.75,
+      "explanation": "two admins pointed vpn at different IPs"
+    },
+    "session_id": "s-dns-21",
+    "entry_id_a": "e-d331",
+    "entry_id_b": "e-d332",
+    "call_a": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "vpn",
+        "type": "A",
+        "value": "198.51.100.2",
+        "changed_by": "admin1"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "vpn",
+        "type": "A",
+        "value": "198.51.100.9",
+        "changed_by": "admin2"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[admin1] repoint vpn to the new concentrator .2"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[admin2, offline queue] repoint vpn to the backup .9"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "ESCALATE",
+    "winning_entry_id": null,
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Both changes are privileged and plausible; wrong choice takes down VPN."
+}

@@ -1,0 +1,48 @@
+{
+  "id": "dec-060",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-trip-7",
+    "entry_id_a": "e-a8101",
+    "entry_id_b": "e-a8102",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:london-q3",
+      "params": {
+        "date": "2026-06-01",
+        "fare_class": "refundable"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:london-q3",
+      "params": {
+        "date": "2026-06-01",
+        "fare_class": "non-refundable"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book london june 1, refundable"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book london june 1, non-refundable, it's cheaper"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.5,
+    "max_confidence": 0.85
+  },
+  "notes": "Near-miss supersession: same date/trip looks like a revision, but fare classes produce two distinct tickets; buying both wastes money."
+}

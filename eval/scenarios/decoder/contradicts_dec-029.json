@@ -1,0 +1,54 @@
+{
+  "id": "dec-029",
+  "category": "contradicts",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-home-6",
+    "entry_id_a": "e-k3101",
+    "entry_id_b": "e-k3102",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:main",
+      "params": {
+        "mode": "heat",
+        "temperature": "70"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:main",
+      "params": {
+        "mode": "cool",
+        "temperature": "76"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set the house to heat at 70"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "heating to 70"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "switch to cooling, 76"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Heat vs cool mode on the same unit are mutually exclusive states."
+}

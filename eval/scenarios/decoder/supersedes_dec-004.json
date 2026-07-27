@@ -1,0 +1,52 @@
+{
+  "id": "dec-004",
+  "category": "supersedes",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-doc-1",
+    "entry_id_a": "e-d401",
+    "entry_id_b": "e-d402",
+    "call_a": {
+      "tool_name": "create_file",
+      "target": "repo:docs/onboarding.md",
+      "params": {
+        "content": "# Onboarding\nStep 1: request VPN access"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_file",
+      "target": "repo:docs/onboarding.md",
+      "params": {
+        "content": "# Onboarding\nStep 1: request VPN and SSO access"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "draft the onboarding doc, first step is VPN access"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "created docs/onboarding.md"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "add SSO to step 1 too"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Same file path, content revised to include SSO."
+}

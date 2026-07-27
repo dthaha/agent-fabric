@@ -1,0 +1,54 @@
+{
+  "id": "dec-006",
+  "category": "supersedes",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-cal-1",
+    "entry_id_a": "e-f601",
+    "entry_id_b": "e-f602",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:design-sync",
+      "params": {
+        "time": "2026-03-02T10:00",
+        "duration_min": 30
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:design-sync",
+      "params": {
+        "time": "2026-03-02T11:00",
+        "duration_min": 30
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "schedule design sync monday at 10"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "scheduled for 10am"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "move it to 11, standup runs long"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Meeting time moved; same meeting identity."
+}

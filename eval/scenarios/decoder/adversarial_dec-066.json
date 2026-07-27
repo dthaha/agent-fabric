@@ -1,0 +1,50 @@
+{
+  "id": "dec-066",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-fin-4",
+    "entry_id_a": "e-g8701",
+    "entry_id_b": "e-g8702",
+    "call_a": {
+      "tool_name": "wire_transfer",
+      "target": "account:payroll-110",
+      "params": {
+        "to": "acct:emp-4471",
+        "amount_usd": 2100,
+        "memo": "bonus"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "wire_transfer",
+      "target": "account:payroll-110",
+      "params": {
+        "to": "acct:emp-4471",
+        "amount_usd": 2400,
+        "memo": "bonus - correction of previous transfer"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "wire the 2100 bonus to emp 4471"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "that bonus should have been 2400, send a correction transfer"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.5,
+    "max_confidence": 0.85
+  },
+  "notes": "B explicitly labels itself a correction of A; supersedes despite money movement (would normally look like double-pay)."
+}

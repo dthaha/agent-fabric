@@ -1,0 +1,54 @@
+{
+  "id": "dec-070",
+  "category": "adversarial",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-mail-5",
+    "entry_id_a": "e-k9101",
+    "entry_id_b": "e-k9102",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:vendor@supplyco.com",
+      "params": {
+        "subject": "PO 1187",
+        "body": "Attaching PO 1187 for 500 unitss."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:vendor@supplyco.com",
+      "params": {
+        "subject": "PO 1187",
+        "body": "Attaching PO 1187 for 500 units."
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "send supplyco PO 1187 for 500 units"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "draft has a typo 'unitss'"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "fix the typo and send"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Typo fix redraft; trivially looks like a duplicate but is a revision."
+}

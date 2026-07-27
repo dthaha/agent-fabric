@@ -1,0 +1,40 @@
+{
+  "id": "dec-046",
+  "category": "independent",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-sms-2",
+    "entry_id_a": "e-k5101",
+    "entry_id_b": "e-k5102",
+    "call_a": {
+      "tool_name": "send_sms",
+      "target": "contact:+15550001111",
+      "params": {
+        "text": "Pickup at 5"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_sms",
+      "target": "contact:+15550002222",
+      "params": {
+        "text": "Pickup at 5"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "text both kids pickup is at 5"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.8,
+    "max_confidence": 1.0
+  },
+  "notes": "Broadcast to two recipients."
+}

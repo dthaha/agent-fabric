@@ -1,0 +1,52 @@
+{
+  "id": "dec-008",
+  "category": "supersedes",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-deploy-1",
+    "entry_id_a": "e-h801",
+    "entry_id_b": "e-h802",
+    "call_a": {
+      "tool_name": "scale_deployment",
+      "target": "service:search-api",
+      "params": {
+        "replicas": 3
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "scale_deployment",
+      "target": "service:search-api",
+      "params": {
+        "replicas": 5
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "scale search-api to 3 replicas for the weekend"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "scaled to 3"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "traffic forecast changed, go to 5"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Replica count revised before/at apply; same service."
+}

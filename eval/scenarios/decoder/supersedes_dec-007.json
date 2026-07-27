@@ -1,0 +1,54 @@
+{
+  "id": "dec-007",
+  "category": "supersedes",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-cfg-1",
+    "entry_id_a": "e-g701",
+    "entry_id_b": "e-g702",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:api-gateway",
+      "params": {
+        "key": "rate_limit_rpm",
+        "value": "1000"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:api-gateway",
+      "params": {
+        "key": "rate_limit_rpm",
+        "value": "2000"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set the gateway rate limit to 1000 rpm"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "rate_limit_rpm=1000 applied"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "bump it to 2000, the batch job is getting throttled"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Same config key, value revised upward with rationale."
+}

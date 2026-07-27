@@ -1,0 +1,52 @@
+{
+  "id": "dec-067",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-trip-8",
+    "entry_id_a": "e-h8801",
+    "entry_id_b": "e-h8802",
+    "call_a": {
+      "tool_name": "cancel_trip",
+      "target": "trip:portland",
+      "params": {
+        "reason": "weather"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:portland",
+      "params": {
+        "date": "2026-03-22"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "cancel portland, storm coming"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "cancelled"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "storm passed - rebook portland for the 22nd"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.5,
+    "max_confidence": 0.85
+  },
+  "notes": "Sequential intentional acts: cancel completed, then a fresh booking; not a contradiction, both stand in order."
+}

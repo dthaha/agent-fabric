@@ -1,0 +1,47 @@
+{
+  "id": "dec-064",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-deploy-5",
+    "entry_id_a": "e-e8501",
+    "entry_id_b": "e-e8502",
+    "call_a": {
+      "tool_name": "scale_deployment",
+      "target": "service:api",
+      "params": {
+        "replicas": 0
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "deploy_service",
+      "target": "service:api",
+      "params": {
+        "version": "4.0.0",
+        "strategy": "rolling"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "scale api to 0 for the database migration window"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "roll out api 4.0.0"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Implicit side-effect conflict: a rolling deploy would start replicas, defeating the scale-to-zero maintenance window."
+}

@@ -1,0 +1,73 @@
+{
+  "id": "med-012",
+  "category": "compensate",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "wire_transfer"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "account:ops-3310"
+        }
+      ],
+      "confidence": 0.88,
+      "explanation": "two amounts for the same payment"
+    },
+    "session_id": "s-fin-20",
+    "entry_id_a": "e-a201",
+    "entry_id_b": "e-a202",
+    "call_a": {
+      "tool_name": "wire_transfer",
+      "target": "account:ops-3310",
+      "params": {
+        "to": "acct:vendor-221",
+        "amount_usd": 3200,
+        "memo": "feb hosting"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "wire_transfer",
+      "target": "account:ops-3310",
+      "params": {
+        "to": "acct:vendor-221",
+        "amount_usd": 2300,
+        "memo": "feb hosting"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "wire 3200 to vendor 221 for feb hosting"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "transfer sent"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "wrong amount! it's 2300"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-a202",
+    "min_confidence": 0.7,
+    "max_confidence": 0.9
+  },
+  "notes": "First wire already sent; compensate by recalling/refunding the 3200 then sending 2300."
+}

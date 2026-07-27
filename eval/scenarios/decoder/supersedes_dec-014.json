@@ -1,0 +1,54 @@
+{
+  "id": "dec-014",
+  "category": "supersedes",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-home-3",
+    "entry_id_a": "e-n1401",
+    "entry_id_b": "e-n1402",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:upstairs",
+      "params": {
+        "temperature": "72",
+        "mode": "auto"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:upstairs",
+      "params": {
+        "temperature": "74",
+        "mode": "heat"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set upstairs to 72 auto"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "done"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "switch it to heat mode and 74, cold snap coming"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Multi-param revision (temp + mode), both changed consistently."
+}

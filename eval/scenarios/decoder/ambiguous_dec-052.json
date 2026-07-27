@@ -1,0 +1,48 @@
+{
+  "id": "dec-052",
+  "category": "ambiguous",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-trip-6",
+    "entry_id_a": "e-e6501",
+    "entry_id_b": "e-e6502",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:sf",
+      "params": {
+        "date": "2026-04-02",
+        "direction": "outbound"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:sf",
+      "params": {
+        "date": "2026-04-09",
+        "direction": "unspecified"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book my SF flight april 2"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "and the april 9 flight"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "Could be the return leg (independent) or a date change (supersedes); direction unspecified in B."
+}

@@ -1,0 +1,72 @@
+{
+  "id": "med-019",
+  "category": "compensate",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "approve_expense"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "expense:exp-3311"
+        }
+      ],
+      "confidence": 0.86,
+      "explanation": "amount dispute after reimbursement"
+    },
+    "session_id": "s-exp-20",
+    "entry_id_a": "e-h271",
+    "entry_id_b": "e-h272",
+    "call_a": {
+      "tool_name": "approve_expense",
+      "target": "expense:exp-3311",
+      "params": {
+        "approved": true,
+        "amount_usd": 900,
+        "reimbursed": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "approve_expense",
+      "target": "expense:exp-3311",
+      "params": {
+        "approved": true,
+        "amount_usd": 600
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "approve exp-3311, $900"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "approved and reimbursed via payroll"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "receipt shows 600, not 900"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-h272",
+    "min_confidence": 0.6,
+    "max_confidence": 0.85
+  },
+  "notes": "Money already paid; claw back the 300 overpayment and correct the record."
+}

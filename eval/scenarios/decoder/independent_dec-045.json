@@ -1,0 +1,40 @@
+{
+  "id": "dec-045",
+  "category": "independent",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-deploy-4",
+    "entry_id_a": "e-j5001",
+    "entry_id_b": "e-j5002",
+    "call_a": {
+      "tool_name": "scale_deployment",
+      "target": "service:web:staging",
+      "params": {
+        "replicas": 1
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "scale_deployment",
+      "target": "service:web:prod",
+      "params": {
+        "replicas": 6
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "scale staging web down to 1 and prod web to 6"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Same service name but different environments; targets differ."
+}

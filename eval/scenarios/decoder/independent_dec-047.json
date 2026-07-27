@@ -1,0 +1,42 @@
+{
+  "id": "dec-047",
+  "category": "independent",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-cfg-3",
+    "entry_id_a": "e-l5201",
+    "entry_id_b": "e-l5202",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:api-gateway",
+      "params": {
+        "key": "timeout_ms",
+        "value": "5000"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:api-gateway",
+      "params": {
+        "key": "max_connections",
+        "value": "512"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set gateway timeout to 5s and max connections to 512"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "INDEPENDENT",
+    "min_confidence": 0.8,
+    "max_confidence": 1.0
+  },
+  "notes": "Different config keys on the same service."
+}

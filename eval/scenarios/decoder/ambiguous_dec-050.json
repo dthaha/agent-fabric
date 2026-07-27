@@ -1,0 +1,48 @@
+{
+  "id": "dec-050",
+  "category": "ambiguous",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-mail-4",
+    "entry_id_a": "e-c6301",
+    "entry_id_b": "e-c6302",
+    "call_a": {
+      "tool_name": "send_email",
+      "target": "contact:team@corp.com",
+      "params": {
+        "subject": "Status update",
+        "body": "Sprint 12 status: on track."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_email",
+      "target": "contact:team@corp.com",
+      "params": {
+        "subject": "Update",
+        "body": "Latest: sprint 12 on track, launch slipped a week."
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "send the team a status update"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "email the team the latest"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "Overlapping content; could be a redraft or a deliberate second announcement."
+}

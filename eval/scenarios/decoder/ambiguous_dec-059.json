@@ -1,0 +1,46 @@
+{
+  "id": "dec-059",
+  "category": "ambiguous",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-git-2",
+    "entry_id_a": "e-l7201",
+    "entry_id_b": "e-l7202",
+    "call_a": {
+      "tool_name": "merge_pr",
+      "target": "repo:api",
+      "params": {
+        "pr": 77
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "delete_branch",
+      "target": "repo:api",
+      "params": {
+        "branch": "hotfix/null-deref"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "merge PR 77 (hotfix/null-deref)"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "delete the hotfix branch when you're done"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "Deleting a merged branch is normal cleanup, but ordering ('when you're done') leaves merge-vs-delete timing unclear."
+}

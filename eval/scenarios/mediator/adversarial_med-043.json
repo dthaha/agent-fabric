@@ -1,0 +1,63 @@
+{
+  "id": "med-043",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "set_thermostat"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "home:nursery"
+        }
+      ],
+      "confidence": 0.88,
+      "explanation": "decoder saw a temp revision"
+    },
+    "session_id": "s-home-25",
+    "entry_id_a": "e-b611",
+    "entry_id_b": "e-b612",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:nursery",
+      "params": {
+        "temperature": "72"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:nursery",
+      "params": {
+        "temperature": "60"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "keep the nursery at 72"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[guest's phone on guest wifi] nursery to 60"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "ESCALATE",
+    "winning_entry_id": null,
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Decoder said SUPERSEDES, but context reveals a second principal (guest) - this is a genuine CONTRADICTS/dispute; mediator should override and escalate."
+}

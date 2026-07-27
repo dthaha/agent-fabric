@@ -1,0 +1,70 @@
+{
+  "id": "med-020",
+  "category": "compensate",
+  "difficulty": "easy",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "send_sms"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "contact:+15559876543"
+        }
+      ],
+      "confidence": 0.9,
+      "explanation": "time corrected after send"
+    },
+    "session_id": "s-sms-21",
+    "entry_id_a": "e-i281",
+    "entry_id_b": "e-i282",
+    "call_a": {
+      "tool_name": "send_sms",
+      "target": "contact:+15559876543",
+      "params": {
+        "text": "Meeting at 3pm in room B",
+        "sent": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_sms",
+      "target": "contact:+15559876543",
+      "params": {
+        "text": "Correction: meeting at 4pm in room B"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "text priya meeting at 3 in room B"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "sent"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "it moved to 4, tell her"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-i282",
+    "min_confidence": 0.75,
+    "max_confidence": 0.95
+  },
+  "notes": "Original SMS delivered; compensating correction message is the redo."
+}

@@ -1,0 +1,72 @@
+{
+  "id": "med-046",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "create_invoice"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "client:acme"
+        }
+      ],
+      "confidence": 0.9,
+      "explanation": "amount revised on same client invoice"
+    },
+    "session_id": "s-inv-23",
+    "entry_id_a": "e-e641",
+    "entry_id_b": "e-e642",
+    "call_a": {
+      "tool_name": "create_invoice",
+      "target": "client:acme",
+      "params": {
+        "amount_usd": 8000,
+        "status": "sent",
+        "invoice": "inv-501"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_invoice",
+      "target": "client:acme",
+      "params": {
+        "amount_usd": 8500,
+        "status": "draft"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "invoice acme 8000"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "inv-501 sent and viewed by client"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "forgot the shipping line item, 8500"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-e642",
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Disguised as LWW, but inv-501 is already sent and viewed; must credit/void and reissue rather than silently overwrite."
+}

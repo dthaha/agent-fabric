@@ -1,0 +1,54 @@
+{
+  "id": "dec-023",
+  "category": "contradicts",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-inv-2",
+    "entry_id_a": "e-e2501",
+    "entry_id_b": "e-e2502",
+    "call_a": {
+      "tool_name": "create_invoice",
+      "target": "client:initech",
+      "params": {
+        "amount_usd": 9800,
+        "due_date": "2026-04-15"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "void_invoice",
+      "target": "client:initech",
+      "params": {
+        "invoice": "inv-2026-041",
+        "reason": "duplicate"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "invoice initech 9800"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "inv-2026-041 created"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "void that invoice, it's a duplicate"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Create and void of the same invoice."
+}

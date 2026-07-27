@@ -1,0 +1,54 @@
+{
+  "id": "dec-018",
+  "category": "supersedes",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-cal-3",
+    "entry_id_a": "e-r1801",
+    "entry_id_b": "e-r1802",
+    "call_a": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:1on1-maya",
+      "params": {
+        "time": "2026-03-03T09:00",
+        "duration_min": 30
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "schedule_meeting",
+      "target": "meeting:1on1-maya",
+      "params": {
+        "time": "2026-03-03T09:00",
+        "duration_min": 60
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "30 min 1:1 with maya tuesday 9am"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "scheduled 30 min"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "make it a full hour, we have a lot to cover"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Duration extension on same meeting."
+}

@@ -1,0 +1,74 @@
+{
+  "id": "med-017",
+  "category": "compensate",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "update_dns"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "zone:example.com"
+        }
+      ],
+      "confidence": 0.92,
+      "explanation": "IP corrected after apply"
+    },
+    "session_id": "s-dns-20",
+    "entry_id_a": "e-f251",
+    "entry_id_b": "e-f252",
+    "call_a": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "api",
+        "type": "A",
+        "value": "10.0.0.99",
+        "applied": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "api",
+        "type": "A",
+        "value": "10.0.0.5"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "point api at 10.0.0.99"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "applied, propagating"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "typo! should be 10.0.0.5"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-f252",
+    "min_confidence": 0.7,
+    "max_confidence": 0.9
+  },
+  "notes": "Wrong value live; revert the .99 record and apply .5 with low TTL to flush caches."
+}

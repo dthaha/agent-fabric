@@ -1,0 +1,50 @@
+{
+  "id": "med-036",
+  "category": "question",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "create_file"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "repo:README.md"
+        }
+      ],
+      "confidence": 0.4,
+      "explanation": "no context; append or overwrite unclear"
+    },
+    "session_id": "s-doc-21",
+    "entry_id_a": "e-d531",
+    "entry_id_b": "e-d532",
+    "call_a": {
+      "tool_name": "create_file",
+      "target": "repo:README.md",
+      "params": {
+        "content": "# Project\nBuild with make."
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_file",
+      "target": "repo:README.md",
+      "params": {
+        "content": "# Project\nBuild with make. Test with make test."
+      },
+      "idempotency_key": ""
+    },
+    "context": []
+  },
+  "expected": {
+    "kind": "question",
+    "resolution": null,
+    "winning_entry_id": null,
+    "min_confidence": 0.0,
+    "max_confidence": 0.6
+  },
+  "notes": "No conversation context; ask whether B is the intended full content."
+}

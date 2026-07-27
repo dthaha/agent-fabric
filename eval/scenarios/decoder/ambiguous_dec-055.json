@@ -1,0 +1,48 @@
+{
+  "id": "dec-055",
+  "category": "ambiguous",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-inv-3",
+    "entry_id_a": "e-h6801",
+    "entry_id_b": "e-h6802",
+    "call_a": {
+      "tool_name": "create_invoice",
+      "target": "client:umbrella",
+      "params": {
+        "amount_usd": 5000,
+        "due_date": "2026-04-01"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_invoice",
+      "target": "client:umbrella",
+      "params": {
+        "amount_usd": 5000,
+        "due_date": "2026-04-15"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "invoice umbrella 5k due april 1"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "invoice umbrella 5k due april 15"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "Same amount, different due date; could be a correction or two billing periods."
+}

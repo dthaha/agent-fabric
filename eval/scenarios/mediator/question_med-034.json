@@ -1,0 +1,63 @@
+{
+  "id": "med-034",
+  "category": "question",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "book_flight"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "trip:sf"
+        }
+      ],
+      "confidence": 0.45,
+      "explanation": "could be return leg or date change"
+    },
+    "session_id": "s-trip-23",
+    "entry_id_a": "e-b511",
+    "entry_id_b": "e-b512",
+    "call_a": {
+      "tool_name": "book_flight",
+      "target": "trip:sf",
+      "params": {
+        "date": "2026-04-02"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:sf",
+      "params": {
+        "date": "2026-04-09"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book SF april 2"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "and the april 9 flight"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "question",
+    "resolution": null,
+    "winning_entry_id": null,
+    "min_confidence": 0.0,
+    "max_confidence": 0.6
+  },
+  "notes": "Must ask: is 4/9 the return, or replacing 4/2?"
+}

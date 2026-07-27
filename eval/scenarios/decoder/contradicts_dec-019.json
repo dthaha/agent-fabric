@@ -1,0 +1,52 @@
+{
+  "id": "dec-019",
+  "category": "contradicts",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-home-5",
+    "entry_id_a": "e-a2101",
+    "entry_id_b": "e-a2102",
+    "call_a": {
+      "tool_name": "lock_door",
+      "target": "home:front-door",
+      "params": {
+        "locked": true
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "lock_door",
+      "target": "home:front-door",
+      "params": {
+        "locked": false
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "lock the front door"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "locked"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "unlock it, the cleaner is here"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Same lock, opposite boolean state."
+}

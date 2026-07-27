@@ -1,0 +1,66 @@
+{
+  "id": "med-041",
+  "category": "question",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "AMBIGUOUS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "grant_access"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "jira:PROJ"
+        }
+      ],
+      "confidence": 0.55,
+      "explanation": "scope qualifier: refinement or restatement"
+    },
+    "session_id": "s-iam-21",
+    "entry_id_a": "e-i581",
+    "entry_id_b": "e-i582",
+    "call_a": {
+      "tool_name": "grant_access",
+      "target": "user:ksmith@corp.com",
+      "params": {
+        "resource": "jira:PROJ",
+        "role": "viewer"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "grant_access",
+      "target": "user:ksmith@corp.com",
+      "params": {
+        "resource": "jira:PROJ",
+        "role": "viewer",
+        "scope": "project-only"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "give ksmith PROJ viewer access"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "make sure it's project-only"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "question",
+    "resolution": null,
+    "winning_entry_id": null,
+    "min_confidence": 0.0,
+    "max_confidence": 0.6
+  },
+  "notes": "Ask whether to narrow the existing grant or re-grant with scope."
+}

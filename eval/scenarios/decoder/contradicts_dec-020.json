@@ -1,0 +1,52 @@
+{
+  "id": "dec-020",
+  "category": "contradicts",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-trip-3",
+    "entry_id_a": "e-b2201",
+    "entry_id_b": "e-b2202",
+    "call_a": {
+      "tool_name": "cancel_trip",
+      "target": "trip:vegas-2026-05",
+      "params": {
+        "reason": "plans changed"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "book_flight",
+      "target": "trip:vegas-2026-05",
+      "params": {
+        "date": "2026-05-02"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "cancel the vegas trip"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "trip cancelled"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "book my flight to vegas for may 2"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Cancel then rebook on same trip target; intents are mutually exclusive."
+}

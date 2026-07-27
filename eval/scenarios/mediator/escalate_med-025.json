@@ -1,0 +1,66 @@
+{
+  "id": "med-025",
+  "category": "escalate",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "approve_expense"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "expense:exp-7780"
+        }
+      ],
+      "confidence": 0.8,
+      "explanation": "approve vs reject by two managers"
+    },
+    "session_id": "s-exp-21",
+    "entry_id_a": "e-e341",
+    "entry_id_b": "e-e342",
+    "call_a": {
+      "tool_name": "approve_expense",
+      "target": "expense:exp-7780",
+      "params": {
+        "approved": true,
+        "approver": "manager-a"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "approve_expense",
+      "target": "expense:exp-7780",
+      "params": {
+        "approved": false,
+        "approver": "manager-b",
+        "reason": "over budget"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[manager a] approved"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[manager b] rejected, over budget"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "ESCALATE",
+    "winning_entry_id": null,
+    "min_confidence": 0.65,
+    "max_confidence": 0.95
+  },
+  "notes": "Equal-authority disagreement; needs finance policy owner."
+}

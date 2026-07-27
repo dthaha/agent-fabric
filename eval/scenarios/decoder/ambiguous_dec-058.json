@@ -1,0 +1,50 @@
+{
+  "id": "dec-058",
+  "category": "ambiguous",
+  "difficulty": "hard",
+  "input": {
+    "session_id": "s-dns-3",
+    "entry_id_a": "e-k7101",
+    "entry_id_b": "e-k7102",
+    "call_a": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "shop",
+        "type": "A",
+        "value": "203.0.113.10"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "shop",
+        "type": "CNAME",
+        "value": "shops.cdn.net"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "point shop at 203.0.113.10"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "actually shop should go through the cdn"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "A and CNAME records can't coexist at one name, but 'actually' suggests replacement; could be supersedes or a misunderstanding of record types."
+}

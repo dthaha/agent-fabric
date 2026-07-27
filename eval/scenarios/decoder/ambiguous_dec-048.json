@@ -1,0 +1,46 @@
+{
+  "id": "dec-048",
+  "category": "ambiguous",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-home-10",
+    "entry_id_a": "e-a6101",
+    "entry_id_b": "e-a6102",
+    "call_a": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {
+        "temperature": "70"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_thermostat",
+      "target": "home:living-room",
+      "params": {
+        "temperature": "73"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[phone, 07:55] set living room to 70"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[laptop, 21:30, offline queue synced] living room 73"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "Hours apart from different surfaces, no revision language; could be a change of mind or a second occupant."
+}

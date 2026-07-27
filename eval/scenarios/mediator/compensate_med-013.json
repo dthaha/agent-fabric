@@ -1,0 +1,71 @@
+{
+  "id": "med-013",
+  "category": "compensate",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "create_invoice"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "client:acme"
+        }
+      ],
+      "confidence": 0.85,
+      "explanation": "amount revised after send"
+    },
+    "session_id": "s-inv-21",
+    "entry_id_a": "e-b211",
+    "entry_id_b": "e-b212",
+    "call_a": {
+      "tool_name": "create_invoice",
+      "target": "client:acme",
+      "params": {
+        "amount_usd": 1200,
+        "status": "sent"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_invoice",
+      "target": "client:acme",
+      "params": {
+        "amount_usd": 1500,
+        "status": "draft"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "invoice acme 1200"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "invoice sent to client"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "should have been 1500 with the rush fee"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "COMPENSATE",
+    "winning_entry_id": "e-b212",
+    "min_confidence": 0.7,
+    "max_confidence": 0.9
+  },
+  "notes": "Invoice already sent; void/credit the 1200 and issue the 1500."
+}

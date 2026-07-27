@@ -1,0 +1,63 @@
+{
+  "id": "med-010",
+  "category": "lww",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "SUPERSEDES",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "update_calendar"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "meeting:all-hands"
+        }
+      ],
+      "confidence": 0.9,
+      "explanation": "title updated"
+    },
+    "session_id": "s-cal-21",
+    "entry_id_a": "e-j1001",
+    "entry_id_b": "e-j1002",
+    "call_a": {
+      "tool_name": "update_calendar",
+      "target": "meeting:all-hands",
+      "params": {
+        "title": "All Hands"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "update_calendar",
+      "target": "meeting:all-hands",
+      "params": {
+        "title": "All Hands - Q3 Awards"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "rename the all hands"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "call it All Hands - Q3 Awards"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "LAST_WRITE_WINS",
+    "winning_entry_id": "e-j1002",
+    "min_confidence": 0.75,
+    "max_confidence": 0.95
+  },
+  "notes": "Title revision; B wins."
+}

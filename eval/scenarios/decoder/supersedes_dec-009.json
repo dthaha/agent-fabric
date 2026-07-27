@@ -1,0 +1,52 @@
+{
+  "id": "dec-009",
+  "category": "supersedes",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-sms-1",
+    "entry_id_a": "e-i901",
+    "entry_id_b": "e-i902",
+    "call_a": {
+      "tool_name": "send_sms",
+      "target": "contact:+15551234567",
+      "params": {
+        "text": "Running 10 min late"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "send_sms",
+      "target": "contact:+15551234567",
+      "params": {
+        "text": "Running 20 min late"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "text sarah I'm running 10 minutes late"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "drafted"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "traffic is worse, say 20"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "SMS text corrected before send."
+}

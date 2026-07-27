@@ -1,0 +1,71 @@
+{
+  "id": "med-044",
+  "category": "adversarial",
+  "difficulty": "hard",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "set_config"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "service:auth"
+        }
+      ],
+      "confidence": 0.7,
+      "explanation": "both values invalid for an integer seconds field"
+    },
+    "session_id": "s-cfg-23",
+    "entry_id_a": "e-c621",
+    "entry_id_b": "e-c622",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:auth",
+      "params": {
+        "key": "session_ttl_s",
+        "value": "abc123"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:auth",
+      "params": {
+        "key": "session_ttl_s",
+        "value": "-500"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set session ttl"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "both queued writes are malformed"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "the value should be 3600"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "ROLLBACK",
+    "winning_entry_id": null,
+    "min_confidence": 0.6,
+    "max_confidence": 0.9
+  },
+  "notes": "Both entries are wrong (non-integer and negative); roll back to the prior known-good value rather than picking either."
+}

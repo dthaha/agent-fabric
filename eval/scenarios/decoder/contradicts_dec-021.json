@@ -1,0 +1,53 @@
+{
+  "id": "dec-021",
+  "category": "contradicts",
+  "difficulty": "easy",
+  "input": {
+    "session_id": "s-fin-1",
+    "entry_id_a": "e-c2301",
+    "entry_id_b": "e-c2302",
+    "call_a": {
+      "tool_name": "freeze_account",
+      "target": "account:chk-5581",
+      "params": {
+        "reason": "suspected fraud"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "wire_transfer",
+      "target": "account:chk-5581",
+      "params": {
+        "to": "acct:vendor-221",
+        "amount_usd": 15000
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "freeze checking 5581, I see a charge I don't recognize"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "account frozen"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "wire 15k to vendor 221 from 5581"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "CONTRADICTS",
+    "min_confidence": 0.85,
+    "max_confidence": 1.0
+  },
+  "notes": "Frozen account cannot send wires; direct state conflict."
+}

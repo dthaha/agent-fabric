@@ -1,0 +1,71 @@
+{
+  "id": "med-032",
+  "category": "quarantine",
+  "difficulty": "medium",
+  "input": {
+    "verdict": {
+      "relation": "CONTRADICTS",
+      "shared_entities": [
+        {
+          "entity_type": "tool",
+          "entity_id": "update_dns"
+        },
+        {
+          "entity_type": "target",
+          "entity_id": "zone:example.com"
+        },
+        {
+          "entity_type": "param",
+          "entity_id": "@"
+        }
+      ],
+      "confidence": 0.83,
+      "explanation": "two values for the apex record"
+    },
+    "session_id": "s-dns-22",
+    "entry_id_a": "e-f451",
+    "entry_id_b": "e-f452",
+    "call_a": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "@",
+        "type": "A",
+        "value": "203.0.113.50"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "update_dns",
+      "target": "zone:example.com",
+      "params": {
+        "record": "@",
+        "type": "A",
+        "value": "203.0.113.99"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "repoint the apex to the new load balancer"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "[contractor's change request] apex to 203.0.113.99"
+      }
+    ]
+  },
+  "expected": {
+    "kind": "resolution",
+    "resolution": "QUARANTINE",
+    "winning_entry_id": null,
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Apex record conflict can take down the whole domain; hold both."
+}

@@ -1,0 +1,54 @@
+{
+  "id": "dec-010",
+  "category": "supersedes",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-inv-1",
+    "entry_id_a": "e-j1001",
+    "entry_id_b": "e-j1002",
+    "call_a": {
+      "tool_name": "create_invoice",
+      "target": "client:globex",
+      "params": {
+        "amount_usd": 4200,
+        "due_date": "2026-04-01"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "create_invoice",
+      "target": "client:globex",
+      "params": {
+        "amount_usd": 4600,
+        "due_date": "2026-04-01"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "invoice globex $4200 due april 1"
+      },
+      {
+        "entry_id": "a-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_ASSISTANT_MESSAGE",
+        "content": "draft invoice created"
+      },
+      {
+        "entry_id": "u-3",
+        "seq": 3,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "forgot the support fee, make it 4600"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "SUPERSEDES",
+    "min_confidence": 0.7,
+    "max_confidence": 0.95
+  },
+  "notes": "Invoice amount corrected while still a draft."
+}

@@ -1,0 +1,48 @@
+{
+  "id": "dec-053",
+  "category": "ambiguous",
+  "difficulty": "medium",
+  "input": {
+    "session_id": "s-cfg-4",
+    "entry_id_a": "e-f6601",
+    "entry_id_b": "e-f6602",
+    "call_a": {
+      "tool_name": "set_config",
+      "target": "service:db-proxy",
+      "params": {
+        "key": "timeout_ms",
+        "value": "2000"
+      },
+      "idempotency_key": ""
+    },
+    "call_b": {
+      "tool_name": "set_config",
+      "target": "service:db-proxy",
+      "params": {
+        "key": "read_timeout_ms",
+        "value": "2000"
+      },
+      "idempotency_key": ""
+    },
+    "context": [
+      {
+        "entry_id": "u-1",
+        "seq": 1,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set the db proxy timeout to 2 seconds"
+      },
+      {
+        "entry_id": "u-2",
+        "seq": 2,
+        "kind": "ENTRY_KIND_USER_MESSAGE",
+        "content": "set read timeout to 2 seconds"
+      }
+    ]
+  },
+  "expected": {
+    "relation": "AMBIGUOUS",
+    "min_confidence": 0.4,
+    "max_confidence": 0.8
+  },
+  "notes": "Similar keys; unclear whether user conflated the two or meant both."
+}
