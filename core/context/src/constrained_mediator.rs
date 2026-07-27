@@ -35,7 +35,15 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 /// Default model when neither `FABRIC_MEDIATOR_MODEL` nor
 /// `FABRIC_DECODER_MODEL` is set.
-const DEFAULT_MODEL: &str = "Qwen/Qwen2.5-7B-Instruct";
+const DEFAULT_MODEL: &str = "poolside/laguna-xs-2.1";
+
+/// Default generation parameters, tuned for propose-ONLY mediation:
+/// reasoning on, a modest sampling budget, room for rationale.
+const DEFAULT_TEMPERATURE: f64 = 0.7;
+const DEFAULT_TOP_K: u32 = 20;
+const DEFAULT_TOP_P: f64 = 0.9;
+const DEFAULT_ENABLE_THINKING: bool = true;
+const DEFAULT_MAX_TOKENS: u32 = 2048;
 
 /// The locked proposal output contract as a real JSON Schema, used for
 /// `response_format: json_schema` constrained decoding. Mirrors
@@ -83,23 +91,31 @@ pub fn proposal_json_schema() -> serde_json::Value {
 /// Configuration for [`ConstrainedMediator`]. No provider is hardcoded: any
 /// OpenAI-compatible chat completions endpoint works (vLLM, Ollama, llama.cpp
 /// server, a hosted provider).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConstrainedMediatorConfig {
     /// Base URL of the endpoint. Both conventions are accepted:
     /// `http://host:port` and `http://host:port/v1`.
     pub base_url: String,
     /// Bearer token, if the endpoint requires one. Local servers often don't.
     pub api_key: Option<String>,
-    /// Model name to request (e.g. `Qwen/Qwen2.5-7B-Instruct`).
+    /// Model name to request (e.g. `poolside/laguna-xs-2.1`).
     pub model: String,
     pub timeout_ms: u64,
+    pub temperature: f64,
+    pub top_k: u32,
+    pub top_p: f64,
+    pub enable_thinking: bool,
+    pub max_tokens: u32,
 }
 
 impl ConstrainedMediatorConfig {
     /// Resolve config from the environment: `OPENAI_BASE_URL` (required),
     /// `OPENAI_API_KEY` (optional), `FABRIC_MEDIATOR_MODEL` (optional; falls
     /// back to `FABRIC_DECODER_MODEL`, then the default),
-    /// `FABRIC_MEDIATOR_TIMEOUT_MS` (optional).
+    /// `FABRIC_MEDIATOR_TIMEOUT_MS`, `FABRIC_MEDIATOR_TEMPERATURE`,
+    /// `FABRIC_MEDIATOR_TOP_K`, `FABRIC_MEDIATOR_TOP_P`,
+    /// `FABRIC_MEDIATOR_ENABLE_THINKING`, `FABRIC_MEDIATOR_MAX_TOKENS`
+    /// (all optional).
     pub fn from_env() -> Result<Self, MediatorError> {
         let model = std::env::var("FABRIC_MEDIATOR_MODEL")
             .ok()
@@ -109,14 +125,25 @@ impl ConstrainedMediatorConfig {
             std::env::var("OPENAI_API_KEY").ok(),
             model,
             std::env::var("FABRIC_MEDIATOR_TIMEOUT_MS").ok(),
+            std::env::var("FABRIC_MEDIATOR_TEMPERATURE").ok(),
+            std::env::var("FABRIC_MEDIATOR_TOP_K").ok(),
+            std::env::var("FABRIC_MEDIATOR_TOP_P").ok(),
+            std::env::var("FABRIC_MEDIATOR_ENABLE_THINKING").ok(),
+            std::env::var("FABRIC_MEDIATOR_MAX_TOKENS").ok(),
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn resolve(
         base_url: Option<String>,
         api_key: Option<String>,
         model: Option<String>,
         timeout_ms: Option<String>,
+        temperature: Option<String>,
+        top_k: Option<String>,
+        top_p: Option<String>,
+        enable_thinking: Option<String>,
+        max_tokens: Option<String>,
     ) -> Result<Self, MediatorError> {
         let base_url = base_url
             .filter(|s| !s.trim().is_empty())
@@ -131,11 +158,51 @@ impl ConstrainedMediatorConfig {
                 .map_err(|_| MediatorError::Config(format!("invalid timeout '{raw}'")))?,
             None => DEFAULT_TIMEOUT_MS,
         };
+        let temperature = match temperature {
+            Some(raw) => raw
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| MediatorError::Config(format!("invalid temperature '{raw}'")))?,
+            None => DEFAULT_TEMPERATURE,
+        };
+        let top_k = match top_k {
+            Some(raw) => raw
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| MediatorError::Config(format!("invalid top_k '{raw}'")))?,
+            None => DEFAULT_TOP_K,
+        };
+        let top_p = match top_p {
+            Some(raw) => raw
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| MediatorError::Config(format!("invalid top_p '{raw}'")))?,
+            None => DEFAULT_TOP_P,
+        };
+        let enable_thinking = match enable_thinking {
+            Some(raw) => raw
+                .trim()
+                .parse::<bool>()
+                .map_err(|_| MediatorError::Config(format!("invalid enable_thinking '{raw}'")))?,
+            None => DEFAULT_ENABLE_THINKING,
+        };
+        let max_tokens = match max_tokens {
+            Some(raw) => raw
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| MediatorError::Config(format!("invalid max_tokens '{raw}'")))?,
+            None => DEFAULT_MAX_TOKENS,
+        };
         Ok(ConstrainedMediatorConfig {
             base_url,
             api_key: api_key.filter(|s| !s.trim().is_empty()),
             model,
             timeout_ms,
+            temperature,
+            top_k,
+            top_p,
+            enable_thinking,
+            max_tokens,
         })
     }
 
@@ -187,8 +254,11 @@ impl ConstrainedMediator {
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": input.render_prompt()}
             ],
-            "temperature": 0.0,
-            "max_tokens": 1024
+            "temperature": self.config.temperature,
+            "top_k": self.config.top_k,
+            "top_p": self.config.top_p,
+            "enable_thinking": self.config.enable_thinking,
+            "max_tokens": self.config.max_tokens
         });
         if constrained {
             body["response_format"] = serde_json::json!({
@@ -285,7 +355,9 @@ mod tests {
     #[test]
     fn resolve_requires_base_url_and_defaults_model() {
         assert!(matches!(
-            ConstrainedMediatorConfig::resolve(None, None, None, None),
+            ConstrainedMediatorConfig::resolve(
+                None, None, None, None, None, None, None, None, None
+            ),
             Err(MediatorError::Config(_))
         ));
         let cfg = ConstrainedMediatorConfig::resolve(
@@ -293,19 +365,67 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(cfg.model, DEFAULT_MODEL);
         assert_eq!(cfg.timeout_ms, DEFAULT_TIMEOUT_MS);
+        assert_eq!(cfg.temperature, DEFAULT_TEMPERATURE);
+        assert_eq!(cfg.top_k, DEFAULT_TOP_K);
+        assert_eq!(cfg.top_p, DEFAULT_TOP_P);
+        assert_eq!(cfg.enable_thinking, DEFAULT_ENABLE_THINKING);
+        assert_eq!(cfg.max_tokens, DEFAULT_MAX_TOKENS);
         let cfg = ConstrainedMediatorConfig::resolve(
             Some("http://x".into()),
             None,
             Some("qwen".into()),
             Some("5000".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(cfg.model, "qwen");
         assert_eq!(cfg.timeout_ms, 5000);
+    }
+
+    #[test]
+    fn resolve_parses_generation_params() {
+        let cfg = ConstrainedMediatorConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            Some("0.4".into()),
+            Some("50".into()),
+            Some("0.95".into()),
+            Some("false".into()),
+            Some("4096".into()),
+        )
+        .unwrap();
+        assert_eq!(cfg.temperature, 0.4);
+        assert_eq!(cfg.top_k, 50);
+        assert_eq!(cfg.top_p, 0.95);
+        assert!(!cfg.enable_thinking);
+        assert_eq!(cfg.max_tokens, 4096);
+        assert!(ConstrainedMediatorConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            None,
+            Some("not-a-number".into()),
+            None,
+            None,
+            None,
+        )
+        .is_err());
     }
 
     #[test]
@@ -315,6 +435,11 @@ mod tests {
             api_key: None,
             model: "m".into(),
             timeout_ms: 1000,
+            temperature: DEFAULT_TEMPERATURE,
+            top_k: DEFAULT_TOP_K,
+            top_p: DEFAULT_TOP_P,
+            enable_thinking: DEFAULT_ENABLE_THINKING,
+            max_tokens: DEFAULT_MAX_TOKENS,
         };
         assert_eq!(
             bare.completions_url(),
@@ -352,6 +477,11 @@ mod tests {
             api_key: Some("k".into()),
             model: "qwen".into(),
             timeout_ms: 1000,
+            temperature: DEFAULT_TEMPERATURE,
+            top_k: DEFAULT_TOP_K,
+            top_p: DEFAULT_TOP_P,
+            enable_thinking: DEFAULT_ENABLE_THINKING,
+            max_tokens: DEFAULT_MAX_TOKENS,
         })
     }
 

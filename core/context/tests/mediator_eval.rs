@@ -180,7 +180,7 @@ fn dry_eval_golden_outputs_match_expected() {
 /// LIVE mode: real endpoint, real mediation. Opt-in via `make eval-mediator`;
 /// skipped (pass) when the endpoint env vars are not set, so CI never breaks.
 #[tokio::test]
-#[ignore = "live eval: requires OPENAI_BASE_URL (FABRIC_MEDIATOR_MODEL optional)"]
+#[ignore = "live eval: requires OPENAI_BASE_URL (recommended: poolside/laguna-xs-2.1, thinking ON)"]
 async fn live_eval_against_endpoint() {
     let config = match ConstrainedMediatorConfig::from_env() {
         Ok(c) => c,

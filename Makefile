@@ -27,15 +27,30 @@ check:
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo fmt --all -- --check
 
-# Live conflict-decoder eval against a real endpoint. Opt-in; requires
-# OPENAI_BASE_URL + FABRIC_DECODER_MODEL (OPENAI_API_KEY if the endpoint
-# needs auth). Not run in CI — the DRY eval runs in `make test` instead.
+# Live conflict-decoder eval against a real endpoint. Opt-in; pre-wired to
+# Laguna XS 2.1 (thinking OFF, classify-tuned sampling). Requires
+# OPENAI_BASE_URL (OPENAI_API_KEY if the endpoint needs auth). Not run in
+# CI — the DRY eval runs in `make test` instead.
 eval-decoder:
+	FABRIC_DECODER_MODEL=poolside/laguna-xs-2.1 \
+	FABRIC_DECODER_TEMPERATURE=0.1 \
+	FABRIC_DECODER_TOP_K=20 \
+	FABRIC_DECODER_TOP_P=0.9 \
+	FABRIC_DECODER_ENABLE_THINKING=false \
+	FABRIC_DECODER_MAX_TOKENS=300 \
+	FABRIC_DECODER_TIMEOUT_MS=30000 \
 	cargo test -p fabric-context --test decoder_eval live -- --ignored --nocapture
 
-# Live conflict-mediator eval against a real endpoint. Opt-in; requires
-# OPENAI_BASE_URL (FABRIC_MEDIATOR_MODEL optional, falls back to
-# FABRIC_DECODER_MODEL or a default; OPENAI_API_KEY if the endpoint needs
-# auth). Not run in CI — the DRY eval runs in `make test` instead.
+# Live conflict-mediator eval against a real endpoint. Opt-in; pre-wired to
+# Laguna XS 2.1 (thinking ON, mediation-tuned sampling). Requires
+# OPENAI_BASE_URL (OPENAI_API_KEY if the endpoint needs auth). Not run in
+# CI — the DRY eval runs in `make test` instead.
 eval-mediator:
+	FABRIC_MEDIATOR_MODEL=poolside/laguna-xs-2.1 \
+	FABRIC_MEDIATOR_TEMPERATURE=0.7 \
+	FABRIC_MEDIATOR_TOP_K=20 \
+	FABRIC_MEDIATOR_TOP_P=0.9 \
+	FABRIC_MEDIATOR_ENABLE_THINKING=true \
+	FABRIC_MEDIATOR_MAX_TOKENS=2048 \
+	FABRIC_MEDIATOR_TIMEOUT_MS=120000 \
 	cargo test -p fabric-context --test mediator_eval live -- --ignored --nocapture

@@ -28,6 +28,17 @@ pub const SYSTEM_PROMPT: &str = include_str!("../../../models/conflict-decoder/s
 /// Default request timeout when the endpoint stalls.
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
+/// Default model when `FABRIC_DECODER_MODEL` is not set.
+const DEFAULT_MODEL: &str = "poolside/laguna-xs-2.1";
+
+/// Default generation parameters, tuned for classify-ONLY decoding: near-
+/// deterministic sampling, thinking off, short output budget.
+const DEFAULT_TEMPERATURE: f64 = 0.1;
+const DEFAULT_TOP_K: u32 = 20;
+const DEFAULT_TOP_P: f64 = 0.9;
+const DEFAULT_ENABLE_THINKING: bool = false;
+const DEFAULT_MAX_TOKENS: u32 = 300;
+
 /// The locked verdict output contract as a real JSON Schema, used for
 /// `response_format: json_schema` constrained decoding. Mirrors
 /// [`crate::decoder::OUTPUT_SCHEMA`] — same fields, same relation enum,
@@ -63,43 +74,62 @@ pub fn verdict_json_schema() -> serde_json::Value {
 /// Configuration for [`ConstrainedDecoder`]. No provider is hardcoded: any
 /// OpenAI-compatible chat completions endpoint works (vLLM, Ollama, llama.cpp
 /// server, a hosted provider).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConstrainedDecoderConfig {
     /// Base URL of the endpoint. Both conventions are accepted:
     /// `http://host:port` and `http://host:port/v1`.
     pub base_url: String,
     /// Bearer token, if the endpoint requires one. Local servers often don't.
     pub api_key: Option<String>,
-    /// Model name to request (e.g. `Qwen/Qwen2.5-3B-Instruct`).
+    /// Model name to request (e.g. `poolside/laguna-xs-2.1`).
     pub model: String,
     pub timeout_ms: u64,
+    pub temperature: f64,
+    pub top_k: u32,
+    pub top_p: f64,
+    pub enable_thinking: bool,
+    pub max_tokens: u32,
 }
 
 impl ConstrainedDecoderConfig {
     /// Resolve config from the environment: `OPENAI_BASE_URL` (required),
-    /// `OPENAI_API_KEY` (optional), `FABRIC_DECODER_MODEL` (required),
-    /// `FABRIC_DECODER_TIMEOUT_MS` (optional).
+    /// `OPENAI_API_KEY` (optional), `FABRIC_DECODER_MODEL` (optional; falls
+    /// back to the default), `FABRIC_DECODER_TIMEOUT_MS`,
+    /// `FABRIC_DECODER_TEMPERATURE`, `FABRIC_DECODER_TOP_K`,
+    /// `FABRIC_DECODER_TOP_P`, `FABRIC_DECODER_ENABLE_THINKING`,
+    /// `FABRIC_DECODER_MAX_TOKENS` (all optional).
     pub fn from_env() -> Result<Self, DecoderError> {
         Self::resolve(
             std::env::var("OPENAI_BASE_URL").ok(),
             std::env::var("OPENAI_API_KEY").ok(),
             std::env::var("FABRIC_DECODER_MODEL").ok(),
             std::env::var("FABRIC_DECODER_TIMEOUT_MS").ok(),
+            std::env::var("FABRIC_DECODER_TEMPERATURE").ok(),
+            std::env::var("FABRIC_DECODER_TOP_K").ok(),
+            std::env::var("FABRIC_DECODER_TOP_P").ok(),
+            std::env::var("FABRIC_DECODER_ENABLE_THINKING").ok(),
+            std::env::var("FABRIC_DECODER_MAX_TOKENS").ok(),
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn resolve(
         base_url: Option<String>,
         api_key: Option<String>,
         model: Option<String>,
         timeout_ms: Option<String>,
+        temperature: Option<String>,
+        top_k: Option<String>,
+        top_p: Option<String>,
+        enable_thinking: Option<String>,
+        max_tokens: Option<String>,
     ) -> Result<Self, DecoderError> {
         let base_url = base_url
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| DecoderError::Config("OPENAI_BASE_URL is not set".into()))?;
         let model = model
             .filter(|s| !s.trim().is_empty())
-            .ok_or_else(|| DecoderError::Config("FABRIC_DECODER_MODEL is not set".into()))?;
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
         let timeout_ms = match timeout_ms {
             Some(raw) => raw
                 .trim()
@@ -107,11 +137,51 @@ impl ConstrainedDecoderConfig {
                 .map_err(|_| DecoderError::Config(format!("invalid timeout '{raw}'")))?,
             None => DEFAULT_TIMEOUT_MS,
         };
+        let temperature = match temperature {
+            Some(raw) => raw
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| DecoderError::Config(format!("invalid temperature '{raw}'")))?,
+            None => DEFAULT_TEMPERATURE,
+        };
+        let top_k = match top_k {
+            Some(raw) => raw
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| DecoderError::Config(format!("invalid top_k '{raw}'")))?,
+            None => DEFAULT_TOP_K,
+        };
+        let top_p = match top_p {
+            Some(raw) => raw
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| DecoderError::Config(format!("invalid top_p '{raw}'")))?,
+            None => DEFAULT_TOP_P,
+        };
+        let enable_thinking = match enable_thinking {
+            Some(raw) => raw
+                .trim()
+                .parse::<bool>()
+                .map_err(|_| DecoderError::Config(format!("invalid enable_thinking '{raw}'")))?,
+            None => DEFAULT_ENABLE_THINKING,
+        };
+        let max_tokens = match max_tokens {
+            Some(raw) => raw
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| DecoderError::Config(format!("invalid max_tokens '{raw}'")))?,
+            None => DEFAULT_MAX_TOKENS,
+        };
         Ok(ConstrainedDecoderConfig {
             base_url,
             api_key: api_key.filter(|s| !s.trim().is_empty()),
             model,
             timeout_ms,
+            temperature,
+            top_k,
+            top_p,
+            enable_thinking,
+            max_tokens,
         })
     }
 
@@ -162,8 +232,11 @@ impl ConstrainedDecoder {
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": input.render_prompt()}
             ],
-            "temperature": 0.0,
-            "max_tokens": 512
+            "temperature": self.config.temperature,
+            "top_k": self.config.top_k,
+            "top_p": self.config.top_p,
+            "enable_thinking": self.config.enable_thinking,
+            "max_tokens": self.config.max_tokens
         });
         if constrained {
             body["response_format"] = serde_json::json!({
@@ -256,17 +329,47 @@ mod tests {
     #[test]
     fn resolve_requires_base_url_and_model() {
         assert!(matches!(
-            ConstrainedDecoderConfig::resolve(None, None, Some("m".into()), None),
+            ConstrainedDecoderConfig::resolve(
+                None,
+                None,
+                Some("m".into()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None
+            ),
             Err(DecoderError::Config(_))
         ));
-        assert!(matches!(
-            ConstrainedDecoderConfig::resolve(Some("http://x".into()), None, None, None),
-            Err(DecoderError::Config(_))
-        ));
+        let cfg = ConstrainedDecoderConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(cfg.model, DEFAULT_MODEL);
+        assert_eq!(cfg.timeout_ms, DEFAULT_TIMEOUT_MS);
+        assert_eq!(cfg.temperature, DEFAULT_TEMPERATURE);
+        assert_eq!(cfg.top_k, DEFAULT_TOP_K);
+        assert_eq!(cfg.top_p, DEFAULT_TOP_P);
+        assert_eq!(cfg.enable_thinking, DEFAULT_ENABLE_THINKING);
+        assert_eq!(cfg.max_tokens, DEFAULT_MAX_TOKENS);
         let cfg = ConstrainedDecoderConfig::resolve(
             Some("http://localhost:8000".into()),
             None,
             Some("qwen".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
             None,
         )
         .unwrap();
@@ -281,6 +384,11 @@ mod tests {
             Some("   ".into()),
             Some("m".into()),
             Some("5000".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(cfg.timeout_ms, 5000);
@@ -290,6 +398,44 @@ mod tests {
             None,
             Some("m".into()),
             Some("not-a-number".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn resolve_parses_generation_params() {
+        let cfg = ConstrainedDecoderConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            Some("0.3".into()),
+            Some("40".into()),
+            Some("0.8".into()),
+            Some("true".into()),
+            Some("512".into()),
+        )
+        .unwrap();
+        assert_eq!(cfg.temperature, 0.3);
+        assert_eq!(cfg.top_k, 40);
+        assert_eq!(cfg.top_p, 0.8);
+        assert!(cfg.enable_thinking);
+        assert_eq!(cfg.max_tokens, 512);
+        assert!(ConstrainedDecoderConfig::resolve(
+            Some("http://x".into()),
+            None,
+            None,
+            None,
+            Some("hot".into()),
+            None,
+            None,
+            None,
+            None,
         )
         .is_err());
     }
@@ -301,6 +447,11 @@ mod tests {
             api_key: None,
             model: "m".into(),
             timeout_ms: 1000,
+            temperature: DEFAULT_TEMPERATURE,
+            top_k: DEFAULT_TOP_K,
+            top_p: DEFAULT_TOP_P,
+            enable_thinking: DEFAULT_ENABLE_THINKING,
+            max_tokens: DEFAULT_MAX_TOKENS,
         };
         assert_eq!(
             bare.completions_url(),
@@ -336,6 +487,11 @@ mod tests {
             api_key: Some("k".into()),
             model: "qwen".into(),
             timeout_ms: 1000,
+            temperature: DEFAULT_TEMPERATURE,
+            top_k: DEFAULT_TOP_K,
+            top_p: DEFAULT_TOP_P,
+            enable_thinking: DEFAULT_ENABLE_THINKING,
+            max_tokens: DEFAULT_MAX_TOKENS,
         })
     }
 

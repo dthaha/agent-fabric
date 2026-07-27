@@ -183,6 +183,10 @@ The fabric emits OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to ship traces
 
 `RUST_LOG` controls verbosity (default `info`). Tool dispatch spans carry `request_id`, `session_id`, `lease_id`, and `tool_name` so traces correlate end-to-end across the tool plane.
 
+## TODO
+
+- [ ] Fine-tune Laguna XS 2.1 on synthetic conflict data (SFT/LoRA) — same weights serve both decoder (thinking off) and mediator (thinking on) tiers
+
 ## License
 
 All code in this repository is [Apache-2.0](LICENSE). VyOS-style model: the code is fully open; the commercial product is signed binaries + SLA + support, not code access. Enterprise features are compile-time cargo feature flags, never runtime paywalls.
