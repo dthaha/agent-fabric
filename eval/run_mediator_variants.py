@@ -21,9 +21,9 @@ parser.add_argument(
 )
 ARGS = parser.parse_args()
 
-TOKEN = os.environ.get("OPENROUTER_API_KEY")
+TOKEN = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
 if not TOKEN:
-    sys.exit("OPENROUTER_API_KEY not set.")
+    sys.exit("OPENAI_API_KEY (or OPENROUTER_API_KEY) not set.")
 API_URL = ARGS.base_url.rstrip("/") + "/chat/completions"
 MODEL = os.environ.get("EVAL_MODEL", "poolside/laguna-xs-2.1:free")
 VARIANT = os.environ.get("EVAL_VARIANT", "baseline")

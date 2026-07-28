@@ -4,7 +4,7 @@
 Usage:
     python run_safety_eval.py [--model SLUG] [--dry-run] [--limit N]
 
-Reads scenarios from scenarios/safety/, calls the model via OpenRouter,
+Reads scenarios from scenarios/safety/, calls the model via an OpenAI-compatible API,
 parses output, scores verdict accuracy + per-category F1 + false positive rate.
 Writes results to results/safety-{model}-{timestamp}.json.
 """
@@ -268,7 +268,7 @@ def check_category_match(expected_cats: list, predicted_cats: list) -> bool:
 # ── Main ───────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="Safety eval runner")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="OpenRouter model slug")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model slug (OpenRouter or self-hosted)")
     parser.add_argument("--dry-run", action="store_true", help="Print scenarios without calling API")
     parser.add_argument("--limit", type=int, default=0, help="Limit number of scenarios")
     parser.add_argument(
@@ -295,9 +295,9 @@ def main():
             print(f"  {s['id']} [{s['category']}/{s['difficulty']}] → {s['expected']['verdict']}")
         return
 
-    token = os.environ.get("OPENROUTER_API_KEY")
+    token = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not token:
-        sys.exit("OPENROUTER_API_KEY not set.")
+        sys.exit("OPENAI_API_KEY (or OPENROUTER_API_KEY) not set.")
     api_url = args.base_url.rstrip("/") + "/chat/completions"
 
     parse_fn = get_parser(args.model)

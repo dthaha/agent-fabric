@@ -10,7 +10,7 @@ classification (decoder) and mediation quality *before* fine-tuning.
 ```bash
 cd eval/
 pip install -r requirements.txt
-export OPENROUTER_API_KEY=sk-or-...
+export OPENAI_API_KEY=sk-...
 ```
 
 ## Run

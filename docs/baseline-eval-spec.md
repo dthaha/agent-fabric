@@ -208,7 +208,7 @@ Generate scenarios that cover:
 ```bash
 cd eval/
 pip install -r requirements.txt
-export OPENROUTER_API_KEY=sk-or-...
+export OPENAI_API_KEY=sk-...
 python run_baseline.py                    # run both tracks
 python run_baseline.py --track decoder    # decoder only
 python run_baseline.py --track mediator   # mediator only

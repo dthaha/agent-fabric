@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Baseline evaluation runner for the conflict pipeline (decoder + mediator).
 
-Calls OpenRouter with poolside/laguna-xs-2.1 using the production system
+Calls an OpenAI-compatible API with poolside/laguna-xs-2.1 using the production system
 prompts, scores responses against scenario ground truth, and writes a
 metrics report to results/baseline-{timestamp}.json.
 
@@ -28,7 +28,7 @@ PROMPTS_DIR = BASE_DIR / "prompts"
 RESULTS_DIR = BASE_DIR / "results"
 
 MODEL = "poolside/laguna-xs-2.1"
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
 DECODER_PARAMS = {
     "temperature": 0.1,
@@ -416,6 +416,7 @@ def main():
     parser = argparse.ArgumentParser(description="Baseline eval for the conflict pipeline")
     parser.add_argument("--track", choices=["decoder", "mediator"], default=None, help="run one track only")
     parser.add_argument("--dry-run", action="store_true", help="validate scenarios without API calls")
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="OpenAI-compatible API base URL")
     args = parser.parse_args()
 
     tracks = [args.track] if args.track else ["decoder", "mediator"]
@@ -437,11 +438,11 @@ def main():
         print("Dry-run: all scenarios valid. No API calls made.")
         sys.exit(0)
 
-    api_key = os.environ.get("OPENROUTER_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        print("OPENROUTER_API_KEY not set.")
+        print("OPENAI_API_KEY (or OPENROUTER_API_KEY) not set.")
         sys.exit(1)
-    client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
+    client = OpenAI(base_url=args.base_url, api_key=api_key)
 
     report = {
         "model": MODEL,

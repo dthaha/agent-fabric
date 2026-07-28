@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run baseline eval via OpenRouter API using the MCP OAuth token.
+"""Run baseline eval via any OpenAI-compatible API.
 Saves raw responses + scored metrics. Matches run_baseline.py format exactly."""
 
 import argparse, json, os, re, sys, time, statistics
@@ -26,9 +26,9 @@ parser.add_argument(
 )
 ARGS = parser.parse_args()
 
-TOKEN = os.environ.get("OPENROUTER_API_KEY")
+TOKEN = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
 if not TOKEN:
-    sys.exit("OPENROUTER_API_KEY not set.")
+    sys.exit("OPENAI_API_KEY (or OPENROUTER_API_KEY) not set.")
 API_URL = ARGS.base_url.rstrip("/") + "/chat/completions"
 MODEL = os.environ.get("EVAL_MODEL", "poolside/laguna-xs-2.1:free")
 

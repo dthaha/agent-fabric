@@ -2,7 +2,7 @@
 """Probe safety model output formats — 3 models, 3 test prompts each."""
 import argparse, json, os, sys, time, httpx
 
-OR_TOKEN = os.environ.get("OPENROUTER_API_KEY")
+API_TOKEN = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
 
 parser = argparse.ArgumentParser(description="Probe safety model output formats")
 parser.add_argument(
@@ -11,9 +11,9 @@ parser.add_argument(
     help="OpenAI-compatible API base URL (vLLM, NIM, OpenRouter, ...)",
 )
 args = parser.parse_args()
-if not OR_TOKEN:
-    sys.exit("OPENROUTER_API_KEY not set.")
-OR_URL = args.base_url.rstrip("/") + "/chat/completions"
+if not API_TOKEN:
+    sys.exit("OPENAI_API_KEY (or OPENROUTER_API_KEY) not set.")
+API_URL = args.base_url.rstrip("/") + "/chat/completions"
 HF_URL = "https://api-inference.huggingface.co/models/{model}/v1/chat/completions"
 
 PROMPTS = [
@@ -55,7 +55,7 @@ def call_openrouter(model, system, user_msg):
         "temperature": 0.0,
     }
     t0 = time.time()
-    r = httpx.post(OR_URL, json=body, headers={"Authorization": f"Bearer {OR_TOKEN}"}, timeout=60)
+    r = httpx.post(API_URL, json=body, headers={"Authorization": f"Bearer {API_TOKEN}"}, timeout=60)
     elapsed = time.time() - t0
     data = r.json()
     if "choices" in data:
