@@ -147,16 +147,40 @@ fn full_pipeline_respects_rules_and_policy() {
     assert_eq!(d.locus, Locus::Endpoint);
     assert!(!d.reason.contains("downgraded"));
 
-    // An explicit server preference outranks the restricted-data rule, but
-    // the wrapper still catches it: 'secret' has no egress rule, so the
-    // server decision is downgraded by policy instead.
+    // Deny-wins: restricted data beats an explicit server preference. The
+    // rules engine itself pins the turn to the endpoint before any
+    // user-preference rule can fire.
     let classifier =
         PolicyAwareClassifier::new(RulesClassifier::new(), gate(vec![inference_rule()], vec![]));
     let mut input = server_input();
     input.data_classes = vec!["secret".into()];
     let d = classifier.classify(&input);
     assert_eq!(d.locus, Locus::Endpoint);
-    assert!(d.reason.contains("downgraded"));
+    assert!(d.reason.contains("secret"));
+    assert!(!d.reason.contains("downgraded"));
+}
+
+#[test]
+fn require_approval_egress_blocks_server_like_deny() {
+    // requires_redaction maps to RequireApproval in the gate; on the
+    // synchronous classify path that blocks egress just like a Deny.
+    let data_rules = vec![DataClassRule {
+        data_class: "internal".into(),
+        may_leave_device: true,
+        requires_redaction: true,
+        allowed_destinations: vec!["server".into()],
+    }];
+    let classifier = PolicyAwareClassifier::new(
+        RulesClassifier::new(),
+        gate(vec![inference_rule()], data_rules),
+    );
+
+    let mut input = server_input();
+    input.data_classes = vec!["internal".into()];
+    let d = classifier.classify(&input);
+    assert_eq!(d.locus, Locus::Endpoint);
+    assert!(d.reason.contains("downgraded to endpoint"));
+    assert!(d.reason.contains("internal"));
 }
 
 #[test]

@@ -45,7 +45,9 @@ impl MonotonicClock {
 
     /// The next strictly-increasing timestamp, in UTC epoch milliseconds.
     pub fn tick(&self) -> i64 {
-        let mut last = self.last_ms.lock().expect("clock mutex poisoned");
+        // Recover from a poisoned mutex rather than panicking: the counter
+        // is just an i64, never left in a corrupt state worth dying over.
+        let mut last = self.last_ms.lock().unwrap_or_else(|p| p.into_inner());
         let now = now_ms();
         let tick = if now > *last { now } else { *last + 1 };
         *last = tick;

@@ -9,7 +9,7 @@
 //! object-safe if a boxed backend is ever needed.
 
 use async_trait::async_trait;
-use fabric_types::context::{ContextEntry, Locus};
+use fabric_types::context::{ContextEntry, Locus, SessionMeta};
 use fabric_types::lease::Lease;
 use tokio::task::spawn_blocking;
 
@@ -63,6 +63,9 @@ pub trait ContextStore: Send + Sync {
 
     /// The session's ACTIVE lease, if any.
     async fn active_lease(&self, session_id: &str) -> Result<Option<Lease>>;
+
+    /// Fetch session metadata.
+    async fn session(&self, session_id: &str) -> Result<SessionMeta>;
 
     /// Verify that `writer` currently holds the session's write lease.
     async fn verify_writer(&self, session_id: &str, writer: &str) -> Result<Lease>;
@@ -165,6 +168,12 @@ impl ContextStore for SqliteContextStore {
         let store = self.clone();
         let session_id = session_id.to_string();
         run(move || store.active_lease(&session_id)).await
+    }
+
+    async fn session(&self, session_id: &str) -> Result<SessionMeta> {
+        let store = self.clone();
+        let session_id = session_id.to_string();
+        run(move || store.session(&session_id)).await
     }
 
     async fn verify_writer(&self, session_id: &str, writer: &str) -> Result<Lease> {

@@ -24,6 +24,23 @@ pub fn parser_from_name(name: &str) -> Result<Box<dyn SafetyParser>, String> {
     }
 }
 
+/// Client-level default timeout. Covers the entire request including body
+/// reads; the per-request `tokio::time::timeout` on `config.timeout_ms` is
+/// an additional, tighter cap on the send.
+const DEFAULT_CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Hard cap on a response body (1 MiB). A safety verdict is a handful of
+/// bytes; anything larger is a misbehaving or hostile endpoint and must not
+/// be buffered unboundedly.
+const MAX_RESPONSE_BYTES: usize = 1_048_576;
+
+fn default_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(DEFAULT_CLIENT_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 pub struct SafetyClient {
     http: reqwest::Client,
     config: SafetyConfig,
@@ -34,7 +51,7 @@ impl SafetyClient {
     pub fn new(config: SafetyConfig) -> Result<Self, String> {
         let parser = parser_from_name(&config.parser)?;
         Ok(Self {
-            http: reqwest::Client::new(),
+            http: default_client(),
             config,
             parser,
         })
@@ -42,7 +59,7 @@ impl SafetyClient {
 
     pub fn with_parser(config: SafetyConfig, parser: Box<dyn SafetyParser>) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: default_client(),
             config,
             parser,
         }
@@ -155,10 +172,16 @@ impl SafetyClient {
             )));
         }
 
-        let response_json: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| SafetyError::Http(format!("failed to parse response JSON: {e}")))?;
+        let response_json: serde_json::Value = {
+            let bytes = response.bytes().await.map_err(SafetyError::from)?;
+            if bytes.len() > MAX_RESPONSE_BYTES {
+                return Err(SafetyError::Http(format!(
+                    "response body exceeded {MAX_RESPONSE_BYTES} bytes"
+                )));
+            }
+            serde_json::from_slice(&bytes)
+                .map_err(|e| SafetyError::Http(format!("failed to parse response JSON: {e}")))?
+        };
 
         let raw_output = response_json
             .pointer("/choices/0/message/content")
@@ -173,10 +196,32 @@ impl SafetyClient {
     }
 }
 
+/// Debug view of the generated `SafetyConfig` with the bearer token
+/// redacted. The prost-generated `Debug` would print `api_key` in the clear.
+struct RedactedSafetyConfig<'a>(&'a SafetyConfig);
+
+impl std::fmt::Debug for RedactedSafetyConfig<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let c = self.0;
+        f.debug_struct("SafetyConfig")
+            .field("endpoint_url", &c.endpoint_url)
+            .field("model", &c.model)
+            .field("parser", &c.parser)
+            .field("timeout_ms", &c.timeout_ms)
+            .field("fail_mode", &c.fail_mode)
+            .field("rules", &c.rules)
+            .field("default_action", &c.default_action)
+            .field("api_key", &"[REDACTED]")
+            .field("extra_body_json", &c.extra_body_json)
+            .field("system_prompt", &c.system_prompt)
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for SafetyClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SafetyClient")
-            .field("config", &self.config)
+            .field("config", &RedactedSafetyConfig(&self.config))
             .field("parser", &self.parser.name())
             .finish()
     }
@@ -329,6 +374,16 @@ mod tests {
         cfg.extra_body_json = "{not json".into();
         let client = SafetyClient::with_parser(cfg, Box::new(StubParser));
         assert!(client.request_body("hi").is_err());
+    }
+
+    #[test]
+    fn debug_redacts_api_key() {
+        let mut cfg = test_config("http://x");
+        cfg.api_key = "super-secret-token".into();
+        let client = SafetyClient::with_parser(cfg, Box::new(StubParser));
+        let debug = format!("{client:?}");
+        assert!(!debug.contains("super-secret-token"), "{debug}");
+        assert!(debug.contains("[REDACTED]"), "{debug}");
     }
 
     #[tokio::test]

@@ -89,12 +89,20 @@ pub async fn execute_handoff(
 
 /// Acknowledge a handoff. The new holder reports the sequence it has caught
 /// up to; on success the session returns to ACTIVE and the new holder may
-/// begin writing.
+/// begin writing. The ack must target the new lease's own session, and the
+/// session must still be in the HANDED_OFF state — an ack for any other
+/// session, or a duplicate/late ack after reactivation, is rejected.
 pub async fn ack_handoff(
     store: &impl ContextStore,
     new_lease: &Lease,
     ack: &HandoffAck,
 ) -> Result<()> {
+    if ack.session_id != new_lease.session_id {
+        return Err(StoreError::InvalidTransition(format!(
+            "ack session '{}' does not match lease session '{}'",
+            ack.session_id, new_lease.session_id
+        )));
+    }
     if ack.new_holder != new_lease.holder_id {
         return Err(StoreError::NotLeaseHolder {
             writer: ack.new_holder.clone(),
@@ -111,6 +119,14 @@ pub async fn ack_handoff(
         return Err(StoreError::InvalidTransition(format!(
             "new holder caught up to {} but freeze was at {}",
             ack.caught_up_to_seq, new_lease.granted_seq
+        )));
+    }
+    let session = store.session(&ack.session_id).await?;
+    if session.state != SessionState::HandedOff as i32 {
+        return Err(StoreError::InvalidTransition(format!(
+            "session {} is not HANDED_OFF (state = {}); ack rejected",
+            ack.session_id,
+            crate::db::session_state_name(session.state),
         )));
     }
     store
@@ -250,6 +266,85 @@ mod tests {
             success: true,
             error: String::new(),
         };
+        assert!(matches!(
+            ack_handoff(&store, &new_lease, &ack).await,
+            Err(StoreError::InvalidTransition(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn ack_rejects_mismatched_session_id() {
+        let (store, _old) = setup();
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        store.append_entry(&mut e1).unwrap();
+
+        let req = HandoffRequest {
+            session_id: "s1".into(),
+            from_holder: "endpoint-1".into(),
+            to_holder: "server-1".into(),
+            freeze_at_seq: 1,
+            reason: String::new(),
+        };
+        let new_lease = execute_handoff(&store, &req, Locus::Server, DEFAULT_LEASE_TTL_MS)
+            .await
+            .unwrap();
+
+        // An ack naming a different session must not reactivate s1 — and
+        // must not touch the other session at all.
+        store.create_session(&test_session("s2")).unwrap();
+        let ack = HandoffAck {
+            session_id: "s2".into(),
+            new_holder: "server-1".into(),
+            caught_up_to_seq: 1,
+            success: true,
+            error: String::new(),
+        };
+        assert!(matches!(
+            ack_handoff(&store, &new_lease, &ack).await,
+            Err(StoreError::InvalidTransition(_))
+        ));
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::HandedOff as i32
+        );
+        assert_eq!(
+            store.session("s2").unwrap().state,
+            SessionState::Active as i32
+        );
+    }
+
+    #[tokio::test]
+    async fn ack_rejected_when_session_not_handed_off() {
+        let (store, _old) = setup();
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        store.append_entry(&mut e1).unwrap();
+
+        let req = HandoffRequest {
+            session_id: "s1".into(),
+            from_holder: "endpoint-1".into(),
+            to_holder: "server-1".into(),
+            freeze_at_seq: 1,
+            reason: String::new(),
+        };
+        let new_lease = execute_handoff(&store, &req, Locus::Server, DEFAULT_LEASE_TTL_MS)
+            .await
+            .unwrap();
+
+        let ack = HandoffAck {
+            session_id: "s1".into(),
+            new_holder: "server-1".into(),
+            caught_up_to_seq: 2,
+            success: true,
+            error: String::new(),
+        };
+        ack_handoff(&store, &new_lease, &ack).await.unwrap();
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::Active as i32
+        );
+
+        // A duplicate/late ack after reactivation is rejected: the session
+        // is no longer HANDED_OFF.
         assert!(matches!(
             ack_handoff(&store, &new_lease, &ack).await,
             Err(StoreError::InvalidTransition(_))

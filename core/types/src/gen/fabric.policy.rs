@@ -21,6 +21,7 @@ pub struct EndpointPolicy {
     pub cua: ::core::option::Option<CuaPolicy>,
     #[prost(bool, tag="8")]
     pub kill_switch: bool,
+    /// Not yet enforced — accepted but ignored at runtime.
     #[prost(uint32, tag="9")]
     pub max_retention_hours: u32,
     #[prost(message, repeated, tag="10")]
@@ -93,10 +94,12 @@ pub struct CuaPolicy {
     pub allowed_apps: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag="3")]
     pub denied_apps: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Not yet enforced — accepted but ignored at runtime.
     #[prost(bool, tag="4")]
     pub screenshot_redaction: bool,
     #[prost(bool, tag="5")]
     pub require_confirmation_destructive: bool,
+    /// Not yet enforced — accepted but ignored at runtime.
     #[prost(uint32, tag="6")]
     pub max_actions_per_minute: u32,
 }
@@ -127,7 +130,7 @@ pub struct SafetyConfig {
     pub rules: ::prost::alloc::vec::Vec<SafetyPolicyRule>,
     #[prost(enumeration="SafetyAction", tag="7")]
     pub default_action: i32,
-    /// Bearer token, if the safety endpoint requires one. Empty = no auth.
+    /// Sensitive: bearer token, never logged. Empty = no auth.
     #[prost(string, tag="8")]
     pub api_key: ::prost::alloc::string::String,
     /// Vendor-specific request body extensions as a JSON object string (same
@@ -155,10 +158,12 @@ pub struct InferenceRule {
     pub provider: ::prost::alloc::string::String,
     #[prost(string, repeated, tag="2")]
     pub allowed_models: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Not yet enforced — accepted but ignored at runtime.
     #[prost(string, repeated, tag="3")]
     pub allowed_regions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(uint32, tag="4")]
     pub max_tokens_per_request: u32,
+    /// Not yet enforced — accepted but ignored at runtime.
     #[prost(uint64, tag="5")]
     pub daily_token_budget: u64,
 }
@@ -193,6 +198,7 @@ pub struct EffectivePolicy {
     pub inference_rules: ::prost::alloc::vec::Vec<InferenceRule>,
     #[prost(bool, tag="8")]
     pub kill_switch: bool,
+    /// Not yet enforced — accepted but ignored at runtime.
     #[prost(uint32, tag="9")]
     pub max_retention_hours: u32,
     #[prost(message, optional, tag="10")]

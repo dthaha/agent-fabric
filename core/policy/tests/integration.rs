@@ -62,8 +62,10 @@ fn server_policy(version: &str) -> ServerPolicy {
 #[test]
 fn full_policy_lifecycle() {
     let mut store = PolicyStore::new();
-    store.load_endpoint(endpoint_policy("v1", false, false));
-    store.load_server(server_policy("v1"));
+    store
+        .load_endpoint(endpoint_policy("v1", false, false))
+        .unwrap();
+    store.load_server(server_policy("v1")).unwrap();
 
     let gate = store.gate();
     assert_eq!(store.endpoint_version(), Some("v1"));
@@ -84,9 +86,11 @@ fn full_policy_lifecycle() {
         gate.check_inference("bedrock", "gpt-4o", 100),
         Decision::Deny(_)
     ));
+    // Model selection fails closed when no model rule matches (the policy
+    // pack configures none).
     assert!(matches!(
         gate.check_model("bedrock/claude-sonnet", ModelLocus::Server),
-        Decision::Allow
+        Decision::Deny(_)
     ));
 
     // DLP scan redacts SSNs.
@@ -107,7 +111,9 @@ fn full_policy_lifecycle() {
     ));
 
     // Kill switch engages: everything denies.
-    store.load_endpoint(endpoint_policy("v2", true, false));
+    store
+        .load_endpoint(endpoint_policy("v2", true, false))
+        .unwrap();
     assert_eq!(store.endpoint_version(), Some("v2"));
     let gate = store.gate();
     assert!(matches!(gate.check_tool("shell.list"), Decision::Deny(_)));
@@ -118,7 +124,9 @@ fn full_policy_lifecycle() {
     ));
 
     // Hot-reload: kill switch off, CUA now allowed — no restart.
-    store.load_endpoint(endpoint_policy("v3", false, true));
+    store
+        .load_endpoint(endpoint_policy("v3", false, true))
+        .unwrap();
     assert_eq!(store.endpoint_version(), Some("v3"));
     let gate = store.gate();
     assert!(gate.check_tool("cua.click").is_allowed());

@@ -41,8 +41,13 @@ pub struct LeaseClient {
 
 impl LeaseClient {
     pub fn new(base_url: &str, holder_id: &str) -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            http: reqwest::Client::new(),
+            http,
             base_url: base_url.trim_end_matches('/').to_string(),
             holder_id: holder_id.to_string(),
         }

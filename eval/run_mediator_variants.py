@@ -191,7 +191,9 @@ def main():
             exp_res = exp["resolution"]
             exp_kind = exp["kind"]
 
-            res_correct = schema_ok and got_res == exp_res
+            res_correct = None
+            if exp_kind == "resolution" and schema_ok:
+                res_correct = got_res == exp_res
             kind_correct = got_kind == exp_kind
 
             # Winner check for LWW
@@ -213,13 +215,17 @@ def main():
                 "latency_ms": latency, "finish_reason": resp["finish_reason"],
             }
             results.append(rec)
-            status = "OK" if res_correct else "MISS"
+            scored = res_correct if exp_kind == "resolution" else kind_correct
+            status = "OK" if scored else "MISS"
             print(f"{status} ({latency:.0f}ms)", flush=True)
 
     # Metrics
     total = len(results)
     schema_ok_count = sum(1 for r in results if r["schema_ok"])
-    res_correct = sum(1 for r in results if r["resolution_correct"])
+    # Resolution accuracy is scored over resolution-kind scenarios only:
+    # question-kind scenarios have no expected resolution (null).
+    res_cases = [r for r in results if r["expected_kind"] == "resolution"]
+    res_correct = sum(1 for r in res_cases if r["resolution_correct"])
     kind_correct = sum(1 for r in results if r["kind_correct"])
     q_count = sum(1 for r in results if r["got_kind"] == "question")
     latencies = [r["latency_ms"] for r in results if r["latency_ms"] > 0]
@@ -230,7 +236,7 @@ def main():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "total": total,
         "schema_compliance": schema_ok_count / total if total else 0,
-        "resolution_accuracy": res_correct / total if total else 0,
+        "resolution_accuracy": res_correct / len(res_cases) if res_cases else 0,
         "kind_accuracy": kind_correct / total if total else 0,
         "question_rate": q_count / total if total else 0,
         "latency_p50_ms": statistics.median(latencies) if latencies else 0,
@@ -239,7 +245,7 @@ def main():
             {"id": r["id"], "category": r["category"],
              "expected": r["expected_resolution"], "got": r["got_resolution"],
              "expected_kind": r["expected_kind"], "got_kind": r["got_kind"]}
-            for r in results if not r["resolution_correct"]
+            for r in res_cases if not r["resolution_correct"]
         ],
     }
     metrics_path.write_text(json.dumps(metrics, indent=2))
@@ -247,7 +253,7 @@ def main():
     print(f"\n{'='*60}")
     print(f"RESULTS: {metrics_path}")
     print(f"\n{MODEL} [{VARIANT}]")
-    print(f"  Resolution: {res_correct}/{total} ({res_correct/total:.1%})")
+    print(f"  Resolution: {res_correct}/{len(res_cases)} ({res_correct/len(res_cases):.1%})" if res_cases else "  Resolution: n/a")
     print(f"  Kind: {kind_correct}/{total} ({kind_correct/total:.1%})")
     print(f"  Schema: {schema_ok_count}/{total} ({schema_ok_count/total:.1%})")
     print(f"  Question rate: {q_count}/{total} ({q_count/total:.1%})")

@@ -76,12 +76,16 @@ async fn readyz(State(state): State<Arc<DaemonState>>) -> (StatusCode, Json<Valu
 
 /// Human/admin-facing daemon status snapshot.
 async fn status(State(state): State<Arc<DaemonState>>) -> Json<Value> {
-    let active_sessions = state
-        .store
-        .lock()
-        .ok()
-        .and_then(|store| store.active_session_count().ok())
-        .unwrap_or(0);
+    // SQLite reads are blocking; run them off the async executor.
+    let store = state.store.lock().ok().map(|s| s.clone());
+    let active_sessions = match store {
+        Some(store) => {
+            tokio::task::spawn_blocking(move || store.active_session_count().unwrap_or(0))
+                .await
+                .unwrap_or(0)
+        }
+        None => 0,
+    };
     let (endpoint_version, server_version) = state
         .policy
         .read()
@@ -108,28 +112,34 @@ async fn status(State(state): State<Arc<DaemonState>>) -> Json<Value> {
 /// List active sessions from the context store. Read-only admin endpoint
 /// for the CLI.
 async fn sessions(State(state): State<Arc<DaemonState>>) -> Json<Value> {
-    let list = state
-        .store
-        .lock()
-        .ok()
-        .and_then(|store| {
-            store.list_active_sessions().ok().map(|sessions| {
-                sessions
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "session_id": s.session_id,
-                            "state": fabric_types::context::SessionState::try_from(s.state)
-                                .map(|st| st.as_str_name())
-                                .unwrap_or("UNKNOWN"),
-                            "created_at": s.created_at.as_ref().map(|t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000).unwrap_or(0),
-                            "last_entry_seq": store.head_seq(&s.session_id).unwrap_or(0),
+    // SQLite reads are blocking; run them off the async executor.
+    let store = state.store.lock().ok().map(|s| s.clone());
+    let list = match store {
+        Some(store) => tokio::task::spawn_blocking(move || {
+            store
+                .list_active_sessions()
+                .ok()
+                .map(|sessions| {
+                    sessions
+                        .iter()
+                        .map(|s| {
+                            json!({
+                                "session_id": s.session_id,
+                                "state": fabric_types::context::SessionState::try_from(s.state)
+                                    .map(|st| st.as_str_name())
+                                    .unwrap_or("UNKNOWN"),
+                                "created_at": s.created_at.as_ref().map(|t| t.seconds.saturating_mul(1000).saturating_add(i64::from(t.nanos) / 1_000_000)).unwrap_or(0),
+                                "last_entry_seq": store.head_seq(&s.session_id).unwrap_or(0),
+                            })
                         })
-                    })
-                    .collect::<Vec<_>>()
-            })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
         })
-        .unwrap_or_default();
+        .await
+        .unwrap_or_default(),
+        None => Vec::new(),
+    };
     Json(json!(list))
 }
 
@@ -209,12 +219,17 @@ mod tests {
         assert_eq!(body["context_store"], true);
         assert_eq!(body["policy_loaded"], false);
 
-        state.policy.write().unwrap().load_endpoint(EndpointPolicy {
-            policy_id: "ep".into(),
-            version: "v1".into(),
-            org_id: "org".into(),
-            ..Default::default()
-        });
+        state
+            .policy
+            .write()
+            .unwrap()
+            .load_endpoint(EndpointPolicy {
+                policy_id: "ep".into(),
+                version: "v1".into(),
+                org_id: "org".into(),
+                ..Default::default()
+            })
+            .unwrap();
 
         let (code, body) = get(&app, "/readyz").await;
         assert_eq!(code, StatusCode::OK);
@@ -258,29 +273,34 @@ mod tests {
     #[tokio::test]
     async fn policy_reports_effective_summary() {
         let state = test_state();
-        state.policy.write().unwrap().load_endpoint(EndpointPolicy {
-            policy_id: "ep".into(),
-            version: "v3".into(),
-            org_id: "org".into(),
-            kill_switch: true,
-            tool_rules: vec![
-                fabric_types::policy::ToolRule {
-                    tool_pattern: "fs.*".into(),
-                    action: fabric_types::policy::ToolAction::Allow as i32,
-                    condition: String::new(),
-                },
-                fabric_types::policy::ToolRule {
-                    tool_pattern: "shell.exec".into(),
-                    action: fabric_types::policy::ToolAction::Deny as i32,
-                    condition: String::new(),
-                },
-            ],
-            cua: Some(fabric_types::policy::CuaPolicy {
-                enabled: true,
+        state
+            .policy
+            .write()
+            .unwrap()
+            .load_endpoint(EndpointPolicy {
+                policy_id: "ep".into(),
+                version: "v3".into(),
+                org_id: "org".into(),
+                kill_switch: true,
+                tool_rules: vec![
+                    fabric_types::policy::ToolRule {
+                        tool_pattern: "fs.*".into(),
+                        action: fabric_types::policy::ToolAction::Allow as i32,
+                        condition: String::new(),
+                    },
+                    fabric_types::policy::ToolRule {
+                        tool_pattern: "shell.exec".into(),
+                        action: fabric_types::policy::ToolAction::Deny as i32,
+                        condition: String::new(),
+                    },
+                ],
+                cua: Some(fabric_types::policy::CuaPolicy {
+                    enabled: true,
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
+            })
+            .unwrap();
         let app = router(state);
 
         let (code, body) = get(&app, "/policy").await;
@@ -331,12 +351,17 @@ mod tests {
     #[tokio::test]
     async fn status_reports_config_and_policy_versions() {
         let state = test_state();
-        state.policy.write().unwrap().load_endpoint(EndpointPolicy {
-            policy_id: "ep".into(),
-            version: "v3".into(),
-            org_id: "org".into(),
-            ..Default::default()
-        });
+        state
+            .policy
+            .write()
+            .unwrap()
+            .load_endpoint(EndpointPolicy {
+                policy_id: "ep".into(),
+                version: "v3".into(),
+                org_id: "org".into(),
+                ..Default::default()
+            })
+            .unwrap();
         let app = router(state);
 
         let (code, body) = get(&app, "/status").await;

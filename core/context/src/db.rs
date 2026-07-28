@@ -71,8 +71,18 @@ pub fn ms_to_timestamp(ms: i64) -> pbjson_types::Timestamp {
 }
 
 pub(crate) fn timestamp_to_ms(ts: Option<&pbjson_types::Timestamp>) -> i64 {
-    ts.map(|t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000)
-        .unwrap_or(0)
+    ts.map(|t| {
+        t.seconds
+            .saturating_mul(1000)
+            .saturating_add(i64::from(t.nanos) / 1_000_000)
+    })
+    .unwrap_or(0)
+}
+
+/// A lease is expired AT its deadline, not after it. `expires_at <= 0` means
+/// no deadline (never expires).
+pub(crate) fn is_expired(expires_at: i64, now: i64) -> bool {
+    expires_at > 0 && now >= expires_at
 }
 
 /// The SQLite-backed context store. Wraps a single SQLite connection behind
@@ -111,7 +121,10 @@ impl SqliteContextStore {
     /// Lock the underlying connection. Never hold the guard across a call
     /// to another store method: every method takes the lock itself.
     fn conn(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().expect("context store mutex poisoned")
+        // A poisoned mutex means a panicking writer mid-transaction; the
+        // connection itself is still usable. Recover instead of cascading
+        // the panic into a daemon crash-loop.
+        self.conn.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     /// Flush the WAL and close the store. Called on daemon shutdown so no
@@ -298,8 +311,7 @@ impl SqliteContextStore {
     ) -> Result<Lease> {
         if let Some(existing) = self.active_lease(session_id)? {
             let expires_ms = timestamp_to_ms(existing.expires_at.as_ref());
-            let expired = expires_ms > 0 && now_ms() >= expires_ms;
-            if !expired {
+            if !is_expired(expires_ms, now_ms()) {
                 return Err(StoreError::LeaseConflict(session_id.to_string()));
             }
             // Crashed holder: the safety-net TTL fired. Retire the stale
@@ -352,9 +364,11 @@ impl SqliteContextStore {
     /// harness). Discards partial entries from the current incomplete agent
     /// turn: the op-log is truncated back to the last completed flow
     /// boundary — the seq of the last ASSISTANT_MESSAGE entry. Everything
-    /// after that boundary is in-progress and is deleted. If the session
-    /// has no assistant messages yet, the boundary is seq 0 and all entries
-    /// are removed.
+    /// after that boundary is in-progress and is deleted, clamped to the
+    /// entries this lease could have written (`seq > granted_seq`): entries
+    /// from earlier leases are never touched. SYSTEM_EVENT and
+    /// HANDOFF_MARKER entries are never deleted. If the session has no
+    /// assistant messages yet, the boundary is seq 0.
     ///
     /// Requires the caller to hold the active lease. Marks the lease
     /// RELEASED and clears the session's active lease. For normal turn
@@ -380,8 +394,16 @@ impl SqliteContextStore {
             |row| row.get(0),
         )?;
         let removed = self.conn().execute(
-            "DELETE FROM context_entries WHERE session_id = ?1 AND seq > ?2",
-            params![session_id, boundary],
+            "DELETE FROM context_entries
+                 WHERE session_id = ?1 AND seq > ?2 AND seq > ?3
+                   AND kind NOT IN (?4, ?5)",
+            params![
+                session_id,
+                boundary,
+                lease.granted_seq as i64,
+                EntryKind::SystemEvent as i32,
+                EntryKind::HandoffMarker as i32,
+            ],
         )?;
         self.set_lease_state(&lease.lease_id, LeaseState::Released)?;
         self.conn().execute(
@@ -579,7 +601,7 @@ impl SqliteContextStore {
             return Err(StoreError::LeaseNotActive(lease_id.to_string()));
         }
         let expires_ms = timestamp_to_ms(lease.expires_at.as_ref());
-        if expires_ms > 0 && now_ms() >= expires_ms {
+        if is_expired(expires_ms, now_ms()) {
             return Err(StoreError::LeaseExpired(lease_id.to_string()));
         }
         let new_expires = now_ms() + ttl_ms;
@@ -615,7 +637,7 @@ impl SqliteContextStore {
             });
         }
         let expires_ms = timestamp_to_ms(lease.expires_at.as_ref());
-        if expires_ms > 0 && now_ms() > expires_ms {
+        if is_expired(expires_ms, now_ms()) {
             return Err(StoreError::LeaseExpired(lease.lease_id));
         }
         Ok(lease)
@@ -638,9 +660,12 @@ impl SqliteContextStore {
         self.verify_writer(&entry.session_id, &entry.lease_holder)?;
         let seq = self.head_seq(&entry.session_id)? + 1;
         entry.seq = seq;
-        if entry.created_at.is_none() {
-            entry.created_at = Some(ms_to_timestamp(self.clock.tick()));
-        }
+        // The writer always stamps created_at with its own monotonic clock;
+        // a caller-supplied timestamp is never trusted (it could forge
+        // priority in (created_at, entry_id) conflict resolution). Only
+        // insert_entry_raw — the replay/reconcile path — preserves the
+        // original timestamp.
+        entry.created_at = Some(ms_to_timestamp(self.clock.tick()));
         self.insert_entry_raw(entry)?;
         self.conn().execute(
             "UPDATE sessions SET last_activity_ms = ?1 WHERE session_id = ?2",
@@ -1196,6 +1221,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn append_always_restamps_created_at() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .grant_lease(&test_lease("l1", "s1", "endpoint-1"))
+            .unwrap();
+
+        // A caller-supplied timestamp far in the past would win every
+        // (created_at, entry_id) conflict resolution. The store must not
+        // trust it.
+        let forged = ms_to_timestamp(1_000);
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        e1.created_at = Some(forged);
+        store.append_entry(&mut e1).unwrap();
+
+        let stored = store.entry_by_id("e1").unwrap().unwrap();
+        let stored_ms = timestamp_to_ms(stored.created_at.as_ref());
+        assert!(
+            stored_ms >= now_ms() - 60_000,
+            "created_at must be restamped by the writer's clock, got {stored_ms}"
+        );
+
+        // The raw replay path, by contrast, preserves the original
+        // timestamp.
+        let replayed = ContextEntry {
+            created_at: Some(forged),
+            ..test_entry("e2", "s1", "endpoint-1")
+        };
+        store.insert_entry_raw(&replayed).unwrap();
+        let stored = store.entry_by_id("e2").unwrap().unwrap();
+        assert_eq!(timestamp_to_ms(stored.created_at.as_ref()), 1_000);
+    }
+
+    #[test]
     fn single_active_lease_enforced() {
         let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
@@ -1336,6 +1395,104 @@ pub(crate) mod tests {
         store.release_lease("s1", "endpoint-1").unwrap();
         assert_eq!(store.head_seq("s1").unwrap(), 2);
         assert!(store.active_lease("s1").unwrap().is_none());
+    }
+
+    #[test]
+    fn release_with_rollback_never_touches_prior_lease_entries() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+
+        // Lease A: a completed flow (user message + assistant message).
+        store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+        append_kinds(
+            &store,
+            "s1",
+            "endpoint-1",
+            &[EntryKind::UserMessage, EntryKind::AssistantMessage],
+        );
+        store.release_lease("s1", "endpoint-1").unwrap();
+        assert_eq!(store.head_seq("s1").unwrap(), 2);
+
+        // Lease B: a partial turn with no assistant message of its own.
+        let lease_b = store
+            .acquire_lease("s1", "server-1", Locus::Server, 30_000)
+            .unwrap();
+        assert_eq!(lease_b.granted_seq, 2);
+        for (i, kind) in [EntryKind::UserMessage, EntryKind::ToolCall]
+            .iter()
+            .enumerate()
+        {
+            let mut e = test_entry(&format!("b{i}"), "s1", "server-1");
+            e.kind = *kind as i32;
+            store.append_entry(&mut e).unwrap();
+        }
+        assert_eq!(store.head_seq("s1").unwrap(), 4);
+
+        // Rollback on lease B removes only lease B's entries — never lease
+        // A's, even though the rollback boundary (seq 2) came from A.
+        let report = store.release_with_rollback("s1", "server-1").unwrap();
+        assert_eq!(
+            report,
+            RollbackReport {
+                rolled_back_to_seq: 2,
+                entries_removed: 2,
+            }
+        );
+        assert_eq!(store.head_seq("s1").unwrap(), 2);
+        assert_eq!(
+            store.entry_at_seq("s1", 2).unwrap().unwrap().kind,
+            EntryKind::AssistantMessage as i32
+        );
+    }
+
+    #[test]
+    fn release_with_rollback_preserves_system_events_and_handoff_markers() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+        append_kinds(&store, "s1", "endpoint-1", &[EntryKind::UserMessage]);
+
+        // A SYSTEM_EVENT and a HANDOFF_MARKER land mid-turn (written via the
+        // raw path, as revoke/handoff do).
+        for (id, kind) in [
+            ("sys-1", EntryKind::SystemEvent),
+            ("ho-1", EntryKind::HandoffMarker),
+        ] {
+            let event = ContextEntry {
+                entry_id: id.into(),
+                session_id: "s1".into(),
+                seq: store.head_seq("s1").unwrap() + 1,
+                kind: kind as i32,
+                payload: b"admin".to_vec(),
+                lease_holder: "system".into(),
+                policy_version: String::new(),
+                locus: Locus::Unspecified as i32,
+                created_at: Some(ms_to_timestamp(now_ms())),
+            };
+            store.insert_entry_raw(&event).unwrap();
+        }
+        let mut e = test_entry("tc1", "s1", "endpoint-1");
+        e.kind = EntryKind::ToolCall as i32;
+        store.append_entry(&mut e).unwrap();
+        assert_eq!(store.head_seq("s1").unwrap(), 4);
+
+        // Boundary is 0 (no assistant messages): everything the lease wrote
+        // rolls back, but the event/marker entries survive.
+        let report = store.release_with_rollback("s1", "endpoint-1").unwrap();
+        assert_eq!(report.entries_removed, 2);
+        let survivors = store.entries_since("s1", 0).unwrap();
+        let kinds: Vec<i32> = survivors.iter().map(|e| e.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                EntryKind::SystemEvent as i32,
+                EntryKind::HandoffMarker as i32
+            ]
+        );
     }
 
     #[test]

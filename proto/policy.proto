@@ -13,6 +13,7 @@ message EndpointPolicy {
   repeated ModelRule model_rules = 6;
   CuaPolicy cua = 7;
   bool kill_switch = 8;
+  // Not yet enforced — accepted but ignored at runtime.
   uint32 max_retention_hours = 9;
   repeated DlpPattern dlp_patterns = 10;
   SafetyConfig safety = 11;
@@ -62,8 +63,10 @@ message CuaPolicy {
   bool enabled = 1;
   repeated string allowed_apps = 2;
   repeated string denied_apps = 3;
+  // Not yet enforced — accepted but ignored at runtime.
   bool screenshot_redaction = 4;
   bool require_confirmation_destructive = 5;
+  // Not yet enforced — accepted but ignored at runtime.
   uint32 max_actions_per_minute = 6;
 }
 
@@ -88,7 +91,7 @@ message SafetyConfig {
   FailMode fail_mode = 5;
   repeated SafetyPolicyRule rules = 6;
   SafetyAction default_action = 7;
-  // Bearer token, if the safety endpoint requires one. Empty = no auth.
+  // Sensitive: bearer token, never logged. Empty = no auth.
   string api_key = 8;
   // Vendor-specific request body extensions as a JSON object string (same
   // convention as FABRIC_DECODER_EXTRA_BODY). Merged into the request body;
@@ -121,8 +124,10 @@ enum FailMode {
 message InferenceRule {
   string provider = 1;
   repeated string allowed_models = 2;
+  // Not yet enforced — accepted but ignored at runtime.
   repeated string allowed_regions = 3;
   uint32 max_tokens_per_request = 4;
+  // Not yet enforced — accepted but ignored at runtime.
   uint64 daily_token_budget = 5;
 }
 
@@ -143,6 +148,7 @@ message EffectivePolicy {
   CuaPolicy cua = 6;
   repeated InferenceRule inference_rules = 7;
   bool kill_switch = 8;
+  // Not yet enforced — accepted but ignored at runtime.
   uint32 max_retention_hours = 9;
   BackgroundQuota background_quota = 10;
   uint32 max_session_duration_hours = 11;

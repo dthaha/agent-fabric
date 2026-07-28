@@ -10,6 +10,7 @@ mod state;
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio_util::sync::CancellationToken;
@@ -64,7 +65,7 @@ async fn main() -> Result<()> {
     // Lease maintenance: renews server-granted leases before expiry and
     // retries wanted (offline-failed) acquisitions, replaying the local
     // op-log on reconnect. Advisory only — local work never waits on it.
-    tokio::spawn(lease::lease_maintenance(Arc::clone(&state), token.clone()));
+    let maintenance = tokio::spawn(lease::lease_maintenance(Arc::clone(&state), token.clone()));
 
     wait_for_shutdown_signal().await;
     info!("shutdown signal received, draining");
@@ -74,6 +75,15 @@ async fn main() -> Result<()> {
         .await
         .context("health server task panicked")?
         .context("health server error")?;
+
+    // Drain lease maintenance before the WAL checkpoint: it holds an Arc to
+    // the state, so the store can only be closed once it has exited. Bounded
+    // — a wedged task must not hang shutdown.
+    match tokio::time::timeout(Duration::from_secs(5), maintenance).await {
+        Ok(Ok(())) => info!("lease maintenance stopped"),
+        Ok(Err(e)) => warn!(error = %e, "lease maintenance task panicked"),
+        Err(_) => warn!("lease maintenance did not stop within 5s; continuing shutdown"),
+    }
 
     // Close the context store, flushing the WAL. The server task has
     // finished by now, so main is the only remaining state holder.
@@ -128,12 +138,19 @@ fn load_policy(state: &DaemonState) {
     match read_endpoint_policy(path) {
         Ok(policy) => {
             let version = policy.version.clone();
-            state
+            match state
                 .policy
                 .write()
                 .expect("policy lock poisoned")
-                .load_endpoint(policy);
-            info!(path = %path.display(), version, "endpoint policy loaded");
+                .load_endpoint(policy)
+            {
+                Ok(()) => info!(path = %path.display(), version, "endpoint policy loaded"),
+                Err(e) => warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "endpoint policy rejected — starting fail-closed"
+                ),
+            }
         }
         Err(e) => warn!(
             path = %path.display(),

@@ -50,6 +50,25 @@ impl SafetyPolicyEnforcer {
             };
         }
 
+        // Unknown = unsafe (fail closed): an unparseable verdict always maps
+        // to the most restrictive action the policy can express, regardless
+        // of `default_action` — the default only applies to Safe verdicts
+        // with no category match. With no rules configured that is Block.
+        if verdict.verdict == crate::safety::SafetyLevel::Unknown {
+            let strictest = self
+                .rules
+                .iter()
+                .map(|r| r.action.clone())
+                .reduce(|a, b| if is_stricter(&a, &b) { a } else { b })
+                .unwrap_or(SafetyAction::Block);
+            return SafetyEnforcement {
+                blocked: strictest == SafetyAction::Block,
+                force_endpoint: strictest == SafetyAction::ForceEndpoint,
+                action: strictest,
+                triggered_categories: verdict.categories.clone(),
+            };
+        }
+
         let mut strictest: SafetyAction = self.default_action.clone();
         let mut triggered = Vec::new();
 
@@ -241,6 +260,25 @@ mod tests {
         assert_eq!(e.triggered_categories.len(), 2);
         assert!(e.triggered_categories.contains(&SafetyCategory::Violence));
         assert!(e.triggered_categories.contains(&SafetyCategory::Injection));
+    }
+
+    #[test]
+    fn unknown_verdict_always_restricted_regardless_of_default() {
+        // default_action Allow must NOT let an Unknown verdict through.
+        let enforcer = SafetyPolicyEnforcer::new(vec![], SafetyAction::Allow);
+        let e = enforcer.enforce(&verdict(SafetyLevel::Unknown, vec![]));
+        assert!(e.blocked);
+        assert_eq!(e.action, SafetyAction::Block);
+
+        // With rules configured, the strictest configured action governs.
+        let enforcer = SafetyPolicyEnforcer::new(
+            vec![warn_rule("violence"), force_rule("pii")],
+            SafetyAction::Allow,
+        );
+        let e = enforcer.enforce(&verdict(SafetyLevel::Unknown, vec![]));
+        assert!(!e.blocked);
+        assert!(e.force_endpoint);
+        assert_eq!(e.action, SafetyAction::ForceEndpoint);
     }
 
     #[test]

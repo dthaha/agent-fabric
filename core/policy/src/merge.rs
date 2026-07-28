@@ -23,6 +23,7 @@ pub fn merge(endpoint: &EndpointPolicy, server: &ServerPolicy) -> EffectivePolic
         cua: endpoint.cua.clone(),
         inference_rules: server.inference_rules.clone(),
         kill_switch: endpoint.kill_switch,
+        // TODO(phase-1): enforce `max_retention_hours` (op-log retention sweep).
         max_retention_hours: endpoint.max_retention_hours,
         background_quota: server.background_quota,
         max_session_duration_hours: server.max_session_duration_hours,

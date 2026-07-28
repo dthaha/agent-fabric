@@ -114,15 +114,18 @@ impl PolicyGate {
         Decision::Deny(format!("tool '{tool_name}' has no allowing rule"))
     }
 
-    /// Gate a model selection for a given locus.
+    /// Gate a model selection for a given locus. No matching rule means
+    /// deny (fail closed), mirroring [`PolicyGate::check_tool`].
     pub fn check_model(&self, model_id: &str, locus: ModelLocus) -> Decision {
         if self.is_killed() {
             return Decision::Deny("kill switch engaged".into());
         }
+        let mut matched = false;
         for rule in &self.effective.model_rules {
             if !glob_matches(&rule.model_pattern, model_id) {
                 continue;
             }
+            matched = true;
             let allowed = match locus {
                 ModelLocus::Local => rule.allowed_local,
                 ModelLocus::Server => rule.allowed_server,
@@ -133,6 +136,9 @@ impl PolicyGate {
                     locus, rule.model_pattern
                 ));
             }
+        }
+        if !matched {
+            return Decision::Deny(format!("model '{model_id}' has no matching rule"));
         }
         Decision::Allow
     }
@@ -226,6 +232,8 @@ impl PolicyGate {
                 rule.max_tokens_per_request
             ));
         }
+        // TODO(phase-7): enforce `allowed_regions` (server-side routing).
+        // TODO(phase-7): enforce `daily_token_budget` (usage accounting).
         Decision::Allow
     }
 
@@ -282,6 +290,8 @@ impl PolicyGate {
         if !cua.allowed_apps.is_empty() && !cua.allowed_apps.iter().any(|p| glob_matches(p, app)) {
             return Decision::Deny(format!("app '{app}' not in CUA allowlist"));
         }
+        // TODO(phase-6): enforce `screenshot_redaction` (CUA actuator).
+        // TODO(phase-6): enforce `max_actions_per_minute` (CUA rate limit).
         Decision::Allow
     }
 
@@ -317,8 +327,13 @@ impl PolicyGate {
                 _ => DlpAction::LogOnly,
             });
             if action == DlpAction::Redact {
+                // NoExpand: the replacement is literal text; a `$` in a
+                // pattern name must not be read as a capture reference.
                 redacted = re
-                    .replace_all(&redacted, format!("[REDACTED:{}]", pattern.name))
+                    .replace_all(
+                        &redacted,
+                        regex::NoExpand(format!("[REDACTED:{}]", pattern.name).as_str()),
+                    )
                     .into_owned();
             }
         }
@@ -475,6 +490,17 @@ mod tests {
     fn unknown_tool_fails_closed() {
         let g = gate(vec![]);
         assert!(matches!(g.check_tool("anything"), Decision::Deny(_)));
+    }
+
+    #[test]
+    fn unknown_model_fails_closed() {
+        let g = gate(vec![]);
+        for locus in [ModelLocus::Local, ModelLocus::Server] {
+            assert!(
+                matches!(g.check_model("anything", locus), Decision::Deny(_)),
+                "locus {locus:?}"
+            );
+        }
     }
 
     #[test]

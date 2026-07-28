@@ -34,6 +34,25 @@ use tracing::info;
 /// store: generous, only firing when a holder crashes without releasing.
 const DEFAULT_LEASE_TTL_MS: i64 = 3_600_000;
 
+/// Maximum TTL a caller may request (1 hour). Unbounded TTLs would let a
+/// crashed holder lock a session forever.
+const MAX_TTL_MS: i64 = 3_600_000;
+
+/// Resolve and validate a caller-supplied TTL. Absent means the default;
+/// out-of-range is a 400.
+fn resolve_ttl(ttl_ms: Option<i64>) -> Result<i64, (StatusCode, Json<Value>)> {
+    let ttl = ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS);
+    if !(1..=MAX_TTL_MS).contains(&ttl) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!("ttl_ms must be between 1 and {MAX_TTL_MS}")
+            })),
+        ));
+    }
+    Ok(ttl)
+}
+
 /// State shared by every control-plane handler. The store is the lease
 /// authority; `identity` is stamped into `granted_by` on every lease the
 /// server issues.
@@ -166,12 +185,13 @@ async fn acquire(
     ensure_session(&state.store, &req.session_id)
         .await
         .map_err(store_err)?;
+    let ttl = resolve_ttl(req.ttl_ms).map_err(IntoResponse::into_response)?;
     let mut lease = ContextStore::acquire_lease(
         &state.store,
         &req.session_id,
         &req.holder_id,
         locus_or_default(req.locus),
-        req.ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS),
+        ttl,
     )
     .await
     .map_err(store_err)?;
@@ -195,7 +215,7 @@ async fn preempt(
         .await
         .map_err(store_err)?;
     let locus = locus_or_default(req.locus);
-    let ttl = req.ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS);
+    let ttl = resolve_ttl(req.ttl_ms).map_err(IntoResponse::into_response)?;
 
     if let Some(old) = ContextStore::active_lease(&state.store, &req.session_id)
         .await
@@ -254,7 +274,7 @@ async fn renew(
     Json(req): Json<RenewLeaseRequest>,
 ) -> Result<Json<Lease>, Response> {
     let store = state.store.clone();
-    let ttl = req.ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS);
+    let ttl = resolve_ttl(req.ttl_ms).map_err(IntoResponse::into_response)?;
     let lease =
         tokio::task::spawn_blocking(move || store.renew_lease(&req.lease_id, &req.holder_id, ttl))
             .await
@@ -564,6 +584,70 @@ mod tests {
         assert_eq!(code, StatusCode::NO_CONTENT);
         let (code, _) = request(&app, "GET", "/lease/active?session_id=s1", None).await;
         assert_eq!(code, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn acquire_and_renew_reject_out_of_range_ttl() {
+        let app = router(test_state());
+
+        for ttl in [0, -5, MAX_TTL_MS + 1] {
+            let (code, body) = request(
+                &app,
+                "POST",
+                "/lease/acquire",
+                Some(json!({
+                    "session_id": "s1",
+                    "holder_id": "endpoint-1",
+                    "ttl_ms": ttl,
+                })),
+            )
+            .await;
+            assert_eq!(code, StatusCode::BAD_REQUEST, "ttl {ttl}: {body}");
+        }
+
+        // Acquire a lease with a valid TTL, then renew with bad ones.
+        let (code, lease) = request(
+            &app,
+            "POST",
+            "/lease/acquire",
+            Some(json!({
+                "session_id": "s1",
+                "holder_id": "endpoint-1",
+                "ttl_ms": 60_000,
+            })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "{lease}");
+        let lease_id = lease["leaseId"].as_str().unwrap();
+
+        for ttl in [0, -1, MAX_TTL_MS + 1] {
+            let (code, body) = request(
+                &app,
+                "POST",
+                "/lease/renew",
+                Some(json!({
+                    "lease_id": lease_id,
+                    "holder_id": "endpoint-1",
+                    "ttl_ms": ttl,
+                })),
+            )
+            .await;
+            assert_eq!(code, StatusCode::BAD_REQUEST, "ttl {ttl}: {body}");
+        }
+
+        // Boundary value: exactly MAX_TTL_MS is accepted.
+        let (code, body) = request(
+            &app,
+            "POST",
+            "/lease/renew",
+            Some(json!({
+                "lease_id": lease_id,
+                "holder_id": "endpoint-1",
+                "ttl_ms": MAX_TTL_MS,
+            })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "{body}");
     }
 
     #[tokio::test]

@@ -57,10 +57,15 @@ impl<C: LocusClassifier> LocusClassifier for PolicyAwareClassifier<C> {
             return Self::downgrade(&decision, "no server-side inference rules in policy");
         }
         // Every data class touched by this turn must be allowed to reach the
-        // server destination.
+        // server destination. RequireApproval blocks egress here too: the
+        // classifier is a synchronous path with no approval round-trip, so
+        // "needs approval" means "not now" — stay on the endpoint.
         for class in &input.data_classes {
-            if let Decision::Deny(reason) = self.gate.check_data_egress(class, "server") {
-                return Self::downgrade(&decision, &reason);
+            match self.gate.check_data_egress(class, "server") {
+                Decision::Deny(reason) | Decision::RequireApproval(reason) => {
+                    return Self::downgrade(&decision, &reason);
+                }
+                Decision::Allow => {}
             }
         }
         decision

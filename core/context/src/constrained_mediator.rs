@@ -47,6 +47,11 @@ const DEFAULT_TEMPERATURE: f64 = 0.7;
 const DEFAULT_TOP_P: f64 = 0.9;
 const DEFAULT_MAX_TOKENS: u32 = 2048;
 
+/// Hard cap on a response body (1 MiB). A chat completion is kilobytes;
+/// anything larger is a misbehaving or hostile endpoint and must not be
+/// buffered unboundedly.
+const MAX_RESPONSE_BYTES: usize = 1_048_576;
+
 /// The locked proposal output contract as a real JSON Schema, used for
 /// `response_format: json_schema` constrained decoding. Mirrors
 /// [`crate::mediator::PROPOSAL_OUTPUT_SCHEMA`] — same fields, same enums,
@@ -299,10 +304,17 @@ impl ConstrainedMediator {
             .map_err(|e| MediatorError::Http(format!("request failed: {e}")))?;
 
         let status = response.status();
-        let text = response
-            .text()
+        let bytes = response
+            .bytes()
             .await
             .map_err(|e| MediatorError::Http(format!("failed to read response body: {e}")))?;
+        if bytes.len() > MAX_RESPONSE_BYTES {
+            return Err(MediatorError::Http(format!(
+                "response body exceeded {MAX_RESPONSE_BYTES} bytes"
+            )));
+        }
+        let text = String::from_utf8(bytes.to_vec())
+            .map_err(|e| MediatorError::Http(format!("response body is not UTF-8: {e}")))?;
         if !status.is_success() {
             return Err(MediatorError::Http(format!(
                 "endpoint returned {status}: {text}"

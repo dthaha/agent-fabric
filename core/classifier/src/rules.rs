@@ -99,40 +99,27 @@ impl LocusClassifier for RulesClassifier {
 
         // ═══ PHASE 1: HARD CONSTRAINTS ═══
         // These always fire. No model advisory can override them.
-        // Rules: kill switch, user prefs (background/server/local),
-        // no network, endpoint-only tools, restricted data.
+        // Rules: kill switch, restricted data, endpoint-only tools,
+        // user prefs (background/server/local), no network.
+        //
+        // DENY WINS: data-class and tool-locality constraints come BEFORE
+        // user-preference steering — a user asking for server execution
+        // never outranks restricted data.
 
         // 1. Kill switch: the gate denies everything anyway; stay local.
         if self.policy_killed {
             return decision(Locus::Endpoint, "kill switch — local only", 1.0, None);
         }
-        // 2. Background execution requested.
-        if input.user_preference == UserLocusPref::Background && input.network_available {
+        // 2. Restricted data may not leave the device.
+        if let Some(class) = self.has_restricted_data(input) {
             return decision(
-                Locus::Server,
-                "user requested background execution",
+                Locus::Endpoint,
+                format!("data class '{class}' must not leave the device"),
                 0.95,
-                Some(Locus::Endpoint),
+                None,
             );
         }
-        // 3. Explicit server preference.
-        if input.user_preference == UserLocusPref::PreferServer && input.network_available {
-            return decision(
-                Locus::Server,
-                "user prefers server",
-                0.9,
-                Some(Locus::Endpoint),
-            );
-        }
-        // 4. Explicit local preference (honoured even with network up).
-        if input.user_preference == UserLocusPref::PreferLocal {
-            return decision(Locus::Endpoint, "user prefers local", 0.95, None);
-        }
-        // 5. No network: forced local.
-        if !input.network_available {
-            return decision(Locus::Endpoint, "no network — forced local", 1.0, None);
-        }
-        // 6. Endpoint-only tools: the hands are here, so the loop stays here.
+        // 3. Endpoint-only tools: the hands are here, so the loop stays here.
         if self.all_tools_endpoint_only(input) {
             return decision(
                 Locus::Endpoint,
@@ -141,14 +128,31 @@ impl LocusClassifier for RulesClassifier {
                 None,
             );
         }
-        // 7. Restricted data may not leave the device.
-        if let Some(class) = self.has_restricted_data(input) {
+        // 4. Background execution requested.
+        if input.user_preference == UserLocusPref::Background && input.network_available {
             return decision(
-                Locus::Endpoint,
-                format!("data class '{class}' must not leave the device"),
+                Locus::Server,
+                "user requested background execution",
                 0.95,
-                None,
+                Some(Locus::Endpoint),
             );
+        }
+        // 5. Explicit server preference.
+        if input.user_preference == UserLocusPref::PreferServer && input.network_available {
+            return decision(
+                Locus::Server,
+                "user prefers server",
+                0.9,
+                Some(Locus::Endpoint),
+            );
+        }
+        // 6. Explicit local preference (honoured even with network up).
+        if input.user_preference == UserLocusPref::PreferLocal {
+            return decision(Locus::Endpoint, "user prefers local", 0.95, None);
+        }
+        // 7. No network: forced local.
+        if !input.network_available {
+            return decision(Locus::Endpoint, "no network — forced local", 1.0, None);
         }
 
         // ═══ PHASE 2: SEMANTIC ESTIMATE ═══
@@ -336,6 +340,31 @@ mod tests {
             assert_eq!(d.confidence, 0.95);
             assert!(d.reason.contains(class));
         }
+    }
+
+    #[test]
+    fn restricted_data_beats_user_preference_for_server() {
+        // Deny-wins: data classes outrank user steering.
+        let c = RulesClassifier::new();
+        for pref in [UserLocusPref::PreferServer, UserLocusPref::Background] {
+            let mut i = input();
+            i.user_preference = pref;
+            i.data_classes = vec!["secret".into()];
+            let d = c.classify(&i);
+            assert_eq!(d.locus, Locus::Endpoint, "pref {pref:?}");
+            assert!(d.reason.contains("secret"), "pref {pref:?}");
+        }
+    }
+
+    #[test]
+    fn endpoint_only_tools_beat_user_preference_for_server() {
+        let c = RulesClassifier::with_config(false, vec![], vec!["cua.click".into()]);
+        let mut i = input();
+        i.user_preference = UserLocusPref::PreferServer;
+        i.required_tools = vec!["cua.click".into()];
+        let d = c.classify(&i);
+        assert_eq!(d.locus, Locus::Endpoint);
+        assert!(d.reason.contains("endpoint-only"));
     }
 
     #[test]

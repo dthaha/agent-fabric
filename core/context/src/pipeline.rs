@@ -104,14 +104,20 @@ impl<D: ConflictDecoder, M: ConflictMediator> ConflictPipeline<D, M> {
         };
 
         // Clarifying questions route to the surface holding presence: the
-        // active lease holder. Empty when no surface is present.
-        let route_to = store
-            .active_lease(&conflict.session_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|lease| lease.holder_id)
-            .unwrap_or_default();
+        // active lease holder. Empty when no surface is present. A store
+        // failure is logged, never silently swallowed.
+        let route_to = match store.active_lease(&conflict.session_id).await {
+            Ok(Some(lease)) => lease.holder_id,
+            Ok(None) => String::new(),
+            Err(e) => {
+                tracing::warn!(
+                    session = %conflict.session_id,
+                    error = %e,
+                    "active lease lookup failed; clarifying question routes nowhere"
+                );
+                String::new()
+            }
+        };
 
         let policy = self.policies.policy_for(tool_category);
         Ok(ConflictResolver::decide(

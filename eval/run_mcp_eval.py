@@ -9,8 +9,7 @@ from datetime import datetime, timezone
 try:
     import httpx
 except ImportError:
-    os.system(f"{sys.executable} -m pip install httpx -q")
-    import httpx
+    sys.exit("httpx is required. Run: pip install -r requirements.txt")
 
 BASE = Path(__file__).resolve().parent
 SCENARIOS = BASE / "scenarios"

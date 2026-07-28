@@ -228,6 +228,15 @@ impl ConflictResolver {
         let proposed = resolution_of(proposal.proposed_resolution);
         let high_stakes = is_high_stakes(&policy.tool_category);
 
+        // Sanitize confidence: a NaN would sail past every comparison
+        // (`NaN < threshold` is false) and auto-apply. Non-finite values are
+        // treated as zero confidence — fail closed.
+        let confidence = if proposal.confidence.is_finite() {
+            proposal.confidence
+        } else {
+            0.0
+        };
+
         // 3 + 5. Confidence gate, with the high-stakes fail-closed bar:
         //    under-confidence never auto-applies. High-stakes categories must
         //    clear the higher bar, and when in doubt they Quarantine.
@@ -236,19 +245,19 @@ impl ConflictResolver {
         } else {
             policy.auto_approve_threshold
         };
-        if proposal.confidence < threshold {
+        if confidence < threshold {
             if high_stakes {
                 return FinalDecision::Quarantine {
                     reason: format!(
                         "confidence {:.2} below high-stakes bar {:.2} for category '{}'; fail closed",
-                        proposal.confidence, threshold, policy.tool_category
+                        confidence, threshold, policy.tool_category
                     ),
                 };
             }
             return FinalDecision::Escalate {
                 reason: format!(
                     "confidence {:.2} below auto-approve threshold {:.2}",
-                    proposal.confidence, threshold
+                    confidence, threshold
                 ),
             };
         }
@@ -516,6 +525,33 @@ mod tests {
         let d =
             ConflictResolver::decide(&p, &permissive(), CompensationCapability::supported(), "h");
         assert!(matches!(d, FinalDecision::Quarantine { .. }));
+    }
+
+    #[test]
+    fn nan_confidence_fails_closed() {
+        // High-stakes: NaN confidence is treated as 0.0, below the bar,
+        // and quarantines.
+        let p = proposal(ConflictResolution::LastWriteWins, f32::NAN, "b");
+        let pol = policy(
+            "financial",
+            ConflictResolution::LastWriteWins,
+            0.5,
+            true,
+            ConflictResolution::Escalate,
+        );
+        let d = ConflictResolver::decide(&p, &pol, CompensationCapability::supported(), "h");
+        assert!(matches!(d, FinalDecision::Quarantine { .. }));
+
+        // Non-high-stakes: NaN still never auto-applies; it escalates.
+        let d =
+            ConflictResolver::decide(&p, &permissive(), CompensationCapability::supported(), "h");
+        assert!(matches!(d, FinalDecision::Escalate { .. }));
+
+        // Infinite confidence is not a free pass either.
+        let p = proposal(ConflictResolution::LastWriteWins, f32::INFINITY, "b");
+        let d =
+            ConflictResolver::decide(&p, &permissive(), CompensationCapability::supported(), "h");
+        assert!(matches!(d, FinalDecision::Escalate { .. }));
     }
 
     #[test]

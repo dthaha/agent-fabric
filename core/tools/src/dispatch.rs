@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use chrono::Timelike;
 use fabric_policy::eval::{Decision, PolicyGate};
 use fabric_types::tools::{ToolDescriptor, ToolLocality, ToolRequest, ToolResponse};
 use thiserror::Error;
@@ -44,6 +45,11 @@ pub trait Tool: Send + Sync {
     /// [`Tool::supports_compensation`] is true. The default fails closed
     /// with [`ToolError::NotCompensable`] so existing tools compile and
     /// behave unchanged.
+    ///
+    /// Never call this directly: compensation is a privileged act and must
+    /// go through the policy gate. Use
+    /// [`ToolDispatcher::dispatch_compensate`].
+    #[doc(hidden)]
     async fn compensate(&self, _request: &ToolRequest) -> Result<ToolResponse, ToolError> {
         Err(ToolError::NotCompensable)
     }
@@ -104,6 +110,9 @@ impl Default for ToolRegistry {
 pub struct ToolDispatcher {
     registry: ToolRegistry,
     policy_gate: PolicyGate,
+    /// The locus this dispatcher runs on ("endpoint" or "server"), fed to
+    /// rule conditions during policy evaluation.
+    locus: String,
 }
 
 impl ToolDispatcher {
@@ -111,11 +120,49 @@ impl ToolDispatcher {
         Self {
             registry,
             policy_gate,
+            locus: "endpoint".into(),
+        }
+    }
+
+    /// Set the locus reported to policy rule conditions. Default:
+    /// "endpoint".
+    pub fn with_locus(mut self, locus: impl Into<String>) -> Self {
+        self.locus = locus.into();
+        self
+    }
+
+    /// The shared gate for every privileged act (execute, compensate):
+    /// lease presence, then the policy check with rule conditions evaluated
+    /// against this dispatcher's locus and the current local hour.
+    fn gate_check(&self, request: &ToolRequest) -> Result<(), ToolError> {
+        // Lease validation: every tool call must carry a valid context
+        // lease ID. Validation is minimal (non-empty) — full lease
+        // verification against the context plane happens at the session
+        // layer; the dispatcher fails closed on a missing lease.
+        if request.lease_id.is_empty() {
+            warn!("tool '{}' rejected: missing lease_id", request.tool_name);
+            return Err(ToolError::PolicyDenied("missing lease_id".into()));
+        }
+
+        let hour = chrono::Local::now().hour();
+        let decision =
+            self.policy_gate
+                .check_tool_with_context(&request.tool_name, &self.locus, hour);
+        match &decision {
+            Decision::Deny(reason) => {
+                warn!("tool '{}' denied by policy: {reason}", request.tool_name);
+                Err(ToolError::PolicyDenied(reason.clone()))
+            }
+            Decision::RequireApproval(reason) => {
+                warn!("tool '{}' requires approval: {reason}", request.tool_name);
+                Err(ToolError::RequiresApproval(reason.clone()))
+            }
+            Decision::Allow => Ok(()),
         }
     }
 
     /// Dispatch a tool request through the policy gate to the tool.
-    /// 1. Check policy gate (tool_rules, kill switch)
+    /// 1. Check policy gate (tool_rules with conditions, kill switch)
     /// 2. Look up tool in registry
     /// 3. Execute
     /// 4. Return ToolResponse with executed_on field
@@ -132,28 +179,8 @@ impl ToolDispatcher {
     pub async fn dispatch(&self, request: ToolRequest) -> Result<ToolResponse, ToolError> {
         debug!("dispatching tool request: {}", request.tool_name);
 
-        // 0. Lease validation: every tool call must carry a valid context
-        // lease ID. Validation is minimal (non-empty) — full lease
-        // verification against the context plane happens at the session
-        // layer; the dispatcher fails closed on a missing lease.
-        if request.lease_id.is_empty() {
-            warn!("tool '{}' rejected: missing lease_id", request.tool_name);
-            return Err(ToolError::PolicyDenied("missing lease_id".into()));
-        }
-
         // 1. Policy gate check
-        let decision = self.policy_gate.check_tool(&request.tool_name);
-        match &decision {
-            Decision::Deny(reason) => {
-                warn!("tool '{}' denied by policy: {reason}", request.tool_name);
-                return Err(ToolError::PolicyDenied(reason.clone()));
-            }
-            Decision::RequireApproval(reason) => {
-                warn!("tool '{}' requires approval: {reason}", request.tool_name);
-                return Err(ToolError::RequiresApproval(reason.clone()));
-            }
-            Decision::Allow => {}
-        }
+        self.gate_check(&request)?;
 
         // 2. Look up tool
         let tool = self
@@ -177,6 +204,40 @@ impl ToolDispatcher {
         );
 
         Ok(response)
+    }
+
+    /// Dispatch a compensation (undo) through the same policy gate as
+    /// [`ToolDispatcher::dispatch`]. Compensation is a privileged act —
+    /// never call `Tool::compensate` directly. Fails with
+    /// [`ToolError::NotCompensable`] when the tool does not support
+    /// compensation.
+    #[tracing::instrument(
+        name = "tool.compensate",
+        skip_all,
+        fields(
+            request_id = %request.request_id,
+            session_id = %request.session_id,
+            lease_id = %request.lease_id,
+            tool_name = %request.tool_name,
+        )
+    )]
+    pub async fn dispatch_compensate(
+        &self,
+        request: ToolRequest,
+    ) -> Result<ToolResponse, ToolError> {
+        debug!("dispatching tool compensation: {}", request.tool_name);
+
+        self.gate_check(&request)?;
+
+        let tool = self
+            .registry
+            .get(&request.tool_name)
+            .ok_or_else(|| ToolError::NotFound(request.tool_name.clone()))?;
+        if !tool.supports_compensation() {
+            return Err(ToolError::NotCompensable);
+        }
+
+        tool.compensate(&request).await
     }
 
     /// Access the underlying registry (immutable).
@@ -420,6 +481,159 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ToolError::NotCompensable));
+    }
+
+    struct CompensableTool {
+        name: String,
+    }
+
+    #[async_trait]
+    impl Tool for CompensableTool {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn descriptor(&self) -> ToolDescriptor {
+            ToolDescriptor {
+                tool_name: self.name.clone(),
+                description: String::new(),
+                input_schema: None,
+                locality: ToolLocality::Either as i32,
+                required_permissions: vec![],
+            }
+        }
+
+        async fn execute(&self, request: &ToolRequest) -> Result<ToolResponse, ToolError> {
+            Ok(ToolResponse {
+                request_id: request.request_id.clone(),
+                success: true,
+                result: None,
+                error: String::new(),
+                screenshot: vec![],
+                screenshot_mime: String::new(),
+                completed_at: None,
+                executed_on: String::new(),
+            })
+        }
+
+        fn supports_compensation(&self) -> bool {
+            true
+        }
+
+        async fn compensate(&self, request: &ToolRequest) -> Result<ToolResponse, ToolError> {
+            let mut resp = self.execute(request).await?;
+            resp.error = String::new();
+            Ok(resp)
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_compensate_goes_through_policy_gate() {
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(CompensableTool {
+                name: "calendar.book".into(),
+            }))
+            .unwrap();
+
+        // Allowed: compensation dispatches.
+        let dispatcher = ToolDispatcher::new(registry, allow_all_gate());
+        let resp = dispatcher
+            .dispatch_compensate(make_request("calendar.book"))
+            .await
+            .unwrap();
+        assert!(resp.success);
+
+        // Denied by policy: compensation never reaches the tool.
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(CompensableTool {
+                name: "calendar.book".into(),
+            }))
+            .unwrap();
+        let dispatcher = ToolDispatcher::new(registry, deny_all_gate());
+        let err = dispatcher
+            .dispatch_compensate(make_request("calendar.book"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)));
+
+        // Missing lease: same failure as dispatch.
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(CompensableTool {
+                name: "calendar.book".into(),
+            }))
+            .unwrap();
+        let dispatcher = ToolDispatcher::new(registry, allow_all_gate());
+        let mut request = make_request("calendar.book");
+        request.lease_id = String::new();
+        let err = dispatcher.dispatch_compensate(request).await.unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn dispatch_compensate_rejects_unsupported_tool() {
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(MockTool::new("shell.exec")))
+            .unwrap();
+        let dispatcher = ToolDispatcher::new(registry, allow_all_gate());
+        let err = dispatcher
+            .dispatch_compensate(make_request("shell.exec"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::NotCompensable));
+    }
+
+    #[tokio::test]
+    async fn dispatch_evaluates_rule_conditions_against_locus() {
+        // The allow rule only fires on the server locus; a dispatcher on
+        // the endpoint must fail closed.
+        let server_only_gate = || {
+            PolicyGate::new(EffectivePolicy {
+                endpoint_version: "test".into(),
+                server_version: "test".into(),
+                data_rules: vec![],
+                tool_rules: vec![ToolRule {
+                    tool_pattern: "shell.*".into(),
+                    action: ToolAction::Allow as i32,
+                    condition: "locus=server".into(),
+                }],
+                model_rules: vec![],
+                cua: None,
+                inference_rules: vec![],
+                kill_switch: false,
+                max_retention_hours: 0,
+                background_quota: None,
+                max_session_duration_hours: 0,
+                max_concurrent_sessions: 0,
+            })
+        };
+
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(MockTool::new("shell.exec")))
+            .unwrap();
+        let dispatcher = ToolDispatcher::new(registry, server_only_gate());
+        let err = dispatcher
+            .dispatch(make_request("shell.exec"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)));
+
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(MockTool::new("shell.exec")))
+            .unwrap();
+        let dispatcher = ToolDispatcher::new(registry, server_only_gate()).with_locus("server");
+        assert!(
+            dispatcher
+                .dispatch(make_request("shell.exec"))
+                .await
+                .unwrap()
+                .success
+        );
     }
 
     #[tokio::test]

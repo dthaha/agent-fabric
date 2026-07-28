@@ -11,17 +11,21 @@ use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::api::{Api, AttachParams, DeleteParams, ListParams, PostParams};
 use kube::Client;
-use tokio::io::AsyncReadExt;
-use tracing::{debug, info};
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tracing::{debug, info, warn};
 
 use crate::container::{
     validate_image_allowed, ContainerError, ContainerId, ContainerInfo, ContainerRuntime,
-    ContainerSpec, ExecOutput, ExecSpec, ImageRef, ListFilter, RegistryAuth,
+    ContainerSpec, ExecOutput, ExecSpec, ImageRef, ListFilter, NetworkPolicy, RegistryAuth,
 };
 
 /// Name of the dockerconfigjson pull secret created by `pull()` when
 /// registry auth is provided.
 const PULL_SECRET_NAME: &str = "fabric-registry-auth";
+
+/// Hard cap on captured exec stdout/stderr (10 MiB). Output beyond the cap
+/// is truncated and flagged, never buffered unboundedly.
+const MAX_EXEC_OUTPUT_BYTES: u64 = 10_485_760;
 
 /// Kubernetes container runtime backend. Connects via the default kubeconfig
 /// or in-cluster config. For dev, minikube sets up kubeconfig automatically.
@@ -160,6 +164,26 @@ impl K8sRuntime {
     }
 }
 
+/// Read an exec stream to EOF, capped at [`MAX_EXEC_OUTPUT_BYTES`]. Returns
+/// the (possibly truncated) UTF-8-lossy contents and whether truncation
+/// happened.
+async fn read_capped(
+    reader: impl AsyncRead + Unpin,
+    stream: &str,
+) -> Result<(String, bool), ContainerError> {
+    let mut limited = reader.take(MAX_EXEC_OUTPUT_BYTES + 1);
+    let mut buf = Vec::new();
+    limited
+        .read_to_end(&mut buf)
+        .await
+        .map_err(|e| ContainerError::ExecFailed(format!("failed to read {stream}: {e}")))?;
+    let truncated = buf.len() as u64 > MAX_EXEC_OUTPUT_BYTES;
+    if truncated {
+        buf.truncate(MAX_EXEC_OUTPUT_BYTES as usize);
+    }
+    Ok((String::from_utf8_lossy(&buf).into_owned(), truncated))
+}
+
 #[async_trait]
 impl ContainerRuntime for K8sRuntime {
     async fn pull(
@@ -182,6 +206,13 @@ impl ContainerRuntime for K8sRuntime {
 
     async fn create(&self, spec: &ContainerSpec) -> Result<ContainerId, ContainerError> {
         validate_image_allowed(&spec.image, &spec.allowed_registries)?;
+
+        if spec.network_policy == NetworkPolicy::Restricted {
+            warn!(
+                pod = %spec.name,
+                "network_policy=Restricted is not yet enforced; pod will have default network access"
+            );
+        }
 
         let ns = self.ns(spec).to_string();
         let pod_name = Self::container_name(spec);
@@ -315,25 +346,30 @@ impl ContainerRuntime for K8sRuntime {
             .await
             .map_err(|e| ContainerError::ExecFailed(format!("failed to exec in pod: {e}")))?;
 
-        let mut stdout_reader = attached
+        let stdout_reader = attached
             .stdout()
             .ok_or_else(|| ContainerError::ExecFailed("stdout stream unavailable".into()))?;
-        let mut stderr_reader = attached
+        let stderr_reader = attached
             .stderr()
             .ok_or_else(|| ContainerError::ExecFailed("stderr stream unavailable".into()))?;
         let status_fut = attached.take_status();
 
-        let mut stdout = String::new();
-        let mut stderr = String::new();
         let (out_res, err_res) = tokio::join!(
-            stdout_reader.read_to_string(&mut stdout),
-            stderr_reader.read_to_string(&mut stderr),
+            read_capped(stdout_reader, "stdout"),
+            read_capped(stderr_reader, "stderr"),
         );
-        out_res.map_err(|e| ContainerError::ExecFailed(format!("failed to read stdout: {e}")))?;
-        err_res.map_err(|e| ContainerError::ExecFailed(format!("failed to read stderr: {e}")))?;
+        let (mut stdout, out_truncated) = out_res?;
+        let (mut stderr, err_truncated) = err_res?;
+        if out_truncated {
+            stdout.push_str("\n[stdout truncated at 10 MiB]");
+        }
+        if err_truncated {
+            stderr.push_str("\n[stderr truncated at 10 MiB]");
+        }
 
         // Real exit status from the exec stream: "Success" maps to 0,
-        // "Failure" maps to the reported status code (1 if absent/zero).
+        // "Failure" maps to the reported status code (1 if absent/zero). A
+        // missing status is NOT success: report -1 so callers fail closed.
         let exit_code = match status_fut {
             Some(fut) => match fut.await {
                 Some(status) if status.status.as_deref() == Some("Success") => 0,
@@ -341,10 +377,13 @@ impl ContainerRuntime for K8sRuntime {
                     0 => 1,
                     code => code,
                 },
-                None => 0,
+                None => -1,
             },
-            None => 0,
+            None => -1,
         };
+        if exit_code == -1 && !stderr.ends_with("status was not reported") {
+            stderr.push_str("\nexec completed but status was not reported");
+        }
 
         Ok(ExecOutput {
             stdout,

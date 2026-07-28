@@ -64,9 +64,14 @@ pub struct DaemonClient {
 
 impl DaemonClient {
     pub fn new(base: impl Into<String>) -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             base: base.into(),
-            http: reqwest::Client::new(),
+            http,
         }
     }
 
