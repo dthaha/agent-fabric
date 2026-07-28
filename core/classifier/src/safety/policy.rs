@@ -1,4 +1,6 @@
-use crate::safety::{SafetyAction, SafetyCategory, SafetyEnforcement, SafetyVerdict};
+use crate::safety::{
+    parse_safety_category, SafetyAction, SafetyCategory, SafetyEnforcement, SafetyVerdict,
+};
 use fabric_types::policy::{SafetyAction as ProtoSafetyAction, SafetyPolicyRule};
 
 pub struct SafetyPolicyEnforcer {
@@ -21,18 +23,7 @@ fn map_proto_action(action: i32) -> SafetyAction {
 }
 
 fn parse_category(s: &str) -> SafetyCategory {
-    match s.trim().to_lowercase().as_str() {
-        "violence" => SafetyCategory::Violence,
-        "sexual_content" | "sexual" => SafetyCategory::SexualContent,
-        "pii" => SafetyCategory::Pii,
-        "financial" => SafetyCategory::Financial,
-        "injection" => SafetyCategory::Injection,
-        "profanity" => SafetyCategory::Profanity,
-        "self_harm" | "self-harm" => SafetyCategory::SelfHarm,
-        "illegal_activity" | "illegal" => SafetyCategory::IllegalActivity,
-        "minor_safety" | "minor" => SafetyCategory::MinorSafety,
-        custom => SafetyCategory::Custom(custom.to_string()),
-    }
+    parse_safety_category(s)
 }
 
 impl SafetyPolicyEnforcer {
@@ -224,6 +215,19 @@ mod tests {
         );
         let e = enforcer.enforce(&v);
         assert!(e.blocked);
+    }
+
+    #[test]
+    fn parser_alias_matches_policy_rule() {
+        // Regression: a parser-emitted alias ("Hate Speech" → Profanity)
+        // must match the same category in a policy rule ("profanity").
+        let enforcer =
+            SafetyPolicyEnforcer::new(vec![block_rule("profanity")], SafetyAction::Allow);
+        let v = verdict(
+            SafetyLevel::Unsafe,
+            vec![parse_safety_category("Hate Speech")],
+        );
+        assert!(enforcer.enforce(&v).blocked);
     }
 
     #[test]

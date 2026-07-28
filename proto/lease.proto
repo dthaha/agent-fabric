@@ -36,6 +36,60 @@ enum LeaseState {
   LEASE_STATE_RELEASED = 5;
 }
 
+// Request to acquire a fresh write lease for a session. 409 while another
+// holder's unexpired lease is active — preemption (presence) is the way to
+// take over a live session, never a raw acquire race.
+message AcquireLeaseRequest {
+  string session_id = 1;
+  string holder_id = 2;
+  optional fabric.context.Locus locus = 3;
+  optional int64 ttl_ms = 4;
+}
+
+// Presence-driven preemption: the surface with the latest server-observed
+// activity takes the lease.
+message PreemptRequest {
+  string session_id = 1;
+  string new_holder_id = 2;
+  string reason = 3;
+  optional fabric.context.Locus locus = 4;
+  optional int64 ttl_ms = 5;
+}
+
+// Request to extend an ACTIVE lease's expiry. Holder must match; the new
+// expiry is stamped with the server clock.
+message RenewLeaseRequest {
+  string lease_id = 1;
+  string holder_id = 2;
+  optional int64 ttl_ms = 3;
+}
+
+// Request to release the lease at the end of a turn. Holder must match.
+message ReleaseLeaseRequest {
+  string session_id = 1;
+  string holder_id = 2;
+}
+
+// Query for the session's ACTIVE lease.
+message ActiveLeaseRequest {
+  string session_id = 1;
+}
+
+// A surface reports user activity. Latest server-observed activity wins the
+// lease: this IS the preemption mechanism.
+message PresenceRequest {
+  string session_id = 1;
+  string surface_id = 2;
+  optional fabric.context.Locus locus = 3;
+}
+
+// Offline-reconnect ingest: an endpoint replays its local op-log after an
+// offline stretch. Entries merge through the deterministic reconcile path.
+message ReplayRequest {
+  string session_id = 1;
+  repeated fabric.context.ContextEntry entries = 2;
+}
+
 // Request to transfer the write lease from one holder to another. Handoff is
 // lease transfer + catch-up, never summarize-and-restart.
 message HandoffRequest {

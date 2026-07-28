@@ -123,6 +123,9 @@ async fn safety_check_unsafe() {
         fail_mode: 0,
         rules: vec![],
         default_action: ProtoSafetyAction::Allow as i32,
+        api_key: String::new(),
+        extra_body_json: String::new(),
+        system_prompt: String::new(),
     };
 
     let client = SafetyClient::with_parser(config, Box::new(MockSafetyParser));
@@ -145,6 +148,9 @@ async fn safety_check_safe() {
         fail_mode: 0,
         rules: vec![],
         default_action: ProtoSafetyAction::Allow as i32,
+        api_key: String::new(),
+        extra_body_json: String::new(),
+        system_prompt: String::new(),
     };
 
     let client = SafetyClient::with_parser(config, Box::new(MockSafetyParser));
@@ -167,6 +173,9 @@ async fn safety_policy_blocks_unsafe() {
         fail_mode: 0,
         rules: vec![],
         default_action: ProtoSafetyAction::Allow as i32,
+        api_key: String::new(),
+        extra_body_json: String::new(),
+        system_prompt: String::new(),
     };
 
     let client = SafetyClient::with_parser(config, Box::new(MockSafetyParser));
@@ -196,6 +205,9 @@ async fn fail_mode_closed_blocks_on_http_error() {
         fail_mode: 1,
         rules: vec![],
         default_action: ProtoSafetyAction::Allow as i32,
+        api_key: String::new(),
+        extra_body_json: String::new(),
+        system_prompt: String::new(),
     };
 
     let client = SafetyClient::with_parser(config, Box::new(MockSafetyParser));
@@ -215,11 +227,14 @@ async fn fail_mode_open_allows_on_http_error() {
         fail_mode: 2,
         rules: vec![],
         default_action: ProtoSafetyAction::Allow as i32,
+        api_key: String::new(),
+        extra_body_json: String::new(),
+        system_prompt: String::new(),
     };
 
     let client = SafetyClient::with_parser(config, Box::new(MockSafetyParser));
-    let result = client.check("test").await;
-    assert!(result.is_err());
+    let verdict = client.check("test").await.unwrap();
+    assert_eq!(verdict.verdict, SafetyLevel::Safe);
 }
 
 #[tokio::test]
@@ -240,6 +255,9 @@ async fn full_pipeline_safety_client_policy() {
             action: ProtoSafetyAction::Block as i32,
         }],
         default_action: ProtoSafetyAction::Allow as i32,
+        api_key: String::new(),
+        extra_body_json: String::new(),
+        system_prompt: String::new(),
     };
 
     let client = SafetyClient::with_parser(config, Box::new(MockSafetyParser));

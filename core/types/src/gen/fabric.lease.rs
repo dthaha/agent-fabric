@@ -30,6 +30,87 @@ pub struct Lease {
     #[prost(string, tag="10")]
     pub preempted_by: ::prost::alloc::string::String,
 }
+/// Request to acquire a fresh write lease for a session. 409 while another
+/// holder's unexpired lease is active — preemption (presence) is the way to
+/// take over a live session, never a raw acquire race.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AcquireLeaseRequest {
+    #[prost(string, tag="1")]
+    pub session_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub holder_id: ::prost::alloc::string::String,
+    #[prost(enumeration="super::context::Locus", optional, tag="3")]
+    pub locus: ::core::option::Option<i32>,
+    #[prost(int64, optional, tag="4")]
+    pub ttl_ms: ::core::option::Option<i64>,
+}
+/// Presence-driven preemption: the surface with the latest server-observed
+/// activity takes the lease.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PreemptRequest {
+    #[prost(string, tag="1")]
+    pub session_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub new_holder_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub reason: ::prost::alloc::string::String,
+    #[prost(enumeration="super::context::Locus", optional, tag="4")]
+    pub locus: ::core::option::Option<i32>,
+    #[prost(int64, optional, tag="5")]
+    pub ttl_ms: ::core::option::Option<i64>,
+}
+/// Request to extend an ACTIVE lease's expiry. Holder must match; the new
+/// expiry is stamped with the server clock.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RenewLeaseRequest {
+    #[prost(string, tag="1")]
+    pub lease_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub holder_id: ::prost::alloc::string::String,
+    #[prost(int64, optional, tag="3")]
+    pub ttl_ms: ::core::option::Option<i64>,
+}
+/// Request to release the lease at the end of a turn. Holder must match.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReleaseLeaseRequest {
+    #[prost(string, tag="1")]
+    pub session_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub holder_id: ::prost::alloc::string::String,
+}
+/// Query for the session's ACTIVE lease.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ActiveLeaseRequest {
+    #[prost(string, tag="1")]
+    pub session_id: ::prost::alloc::string::String,
+}
+/// A surface reports user activity. Latest server-observed activity wins the
+/// lease: this IS the preemption mechanism.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PresenceRequest {
+    #[prost(string, tag="1")]
+    pub session_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub surface_id: ::prost::alloc::string::String,
+    #[prost(enumeration="super::context::Locus", optional, tag="3")]
+    pub locus: ::core::option::Option<i32>,
+}
+/// Offline-reconnect ingest: an endpoint replays its local op-log after an
+/// offline stretch. Entries merge through the deterministic reconcile path.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReplayRequest {
+    #[prost(string, tag="1")]
+    pub session_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
+    pub entries: ::prost::alloc::vec::Vec<super::context::ContextEntry>,
+}
 /// Request to transfer the write lease from one holder to another. Handoff is
 /// lease transfer + catch-up, never summarize-and-restart.
 #[allow(clippy::derive_partial_eq_without_eq)]

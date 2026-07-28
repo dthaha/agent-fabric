@@ -1,4 +1,6 @@
-use crate::safety::{ParseError, SafetyCategory, SafetyLevel, SafetyParser, SafetyVerdict};
+use crate::safety::{
+    parse_safety_category, ParseError, SafetyCategory, SafetyLevel, SafetyParser, SafetyVerdict,
+};
 
 pub struct LlamaGuardParser;
 
@@ -14,16 +16,10 @@ impl Default for LlamaGuardParser {
     }
 }
 
-fn map_s_code(code: &str) -> Result<SafetyCategory, ParseError> {
-    match code.trim().to_uppercase().as_str() {
-        "S1" => Ok(SafetyCategory::Violence),
-        "S2" => Ok(SafetyCategory::SexualContent),
-        "S3" => Ok(SafetyCategory::IllegalActivity),
-        "S4" => Ok(SafetyCategory::Profanity),
-        "S5" => Ok(SafetyCategory::SelfHarm),
-        "S6" => Ok(SafetyCategory::Pii),
-        "S7" => Ok(SafetyCategory::MinorSafety),
-        _ => Err(ParseError::UnknownCategory(code.to_string())),
+fn map_s_code(code: &str) -> Option<SafetyCategory> {
+    match parse_safety_category(code) {
+        SafetyCategory::Custom(_) => None,
+        known => Some(known),
     }
 }
 
@@ -32,14 +28,14 @@ impl SafetyParser for LlamaGuardParser {
         let raw = raw_output.trim();
         let mut lines = raw.lines();
 
-        let first = lines
-            .next()
-            .ok_or_else(|| ParseError::ParseError("empty output".into()))?;
+        let Some(first) = lines.next() else {
+            return Ok(SafetyVerdict::unknown(model_id, raw));
+        };
 
         let verdict = match first.trim().to_lowercase().as_str() {
             "safe" => SafetyLevel::Safe,
             "unsafe" => SafetyLevel::Unsafe,
-            other => return Err(ParseError::UnknownVerdict(other.to_string())),
+            _ => return Ok(SafetyVerdict::unknown(model_id, raw)),
         };
 
         let mut categories = Vec::new();
@@ -49,7 +45,10 @@ impl SafetyParser for LlamaGuardParser {
                 for code in codes.split(',') {
                     let code = code.trim();
                     if !code.is_empty() {
-                        categories.push(map_s_code(code)?);
+                        match map_s_code(code) {
+                            Some(cat) => categories.push(cat),
+                            None => return Ok(SafetyVerdict::unknown(model_id, raw)),
+                        }
                     }
                 }
             }
@@ -103,18 +102,26 @@ mod tests {
     }
 
     #[test]
-    fn parse_unknown_s_code() {
+    fn parse_unknown_s_code_returns_unknown() {
         let parser = LlamaGuardParser::new();
         let output = "unsafe\nS99";
-        let result = parser.parse(output, "llama-guard-3-8b");
-        assert!(result.is_err());
+        let v = parser.parse(output, "llama-guard-3-8b").unwrap();
+        assert_eq!(v.verdict, SafetyLevel::Unknown);
+        assert!(v.categories.is_empty());
     }
 
     #[test]
-    fn parse_unknown_verdict() {
+    fn parse_unknown_verdict_returns_unknown() {
         let parser = LlamaGuardParser::new();
-        let result = parser.parse("maybe", "llama-guard-3-8b");
-        assert!(result.is_err());
+        let v = parser.parse("maybe", "llama-guard-3-8b").unwrap();
+        assert_eq!(v.verdict, SafetyLevel::Unknown);
+    }
+
+    #[test]
+    fn parse_empty_output_returns_unknown() {
+        let parser = LlamaGuardParser::new();
+        let v = parser.parse("", "llama-guard-3-8b").unwrap();
+        assert_eq!(v.verdict, SafetyLevel::Unknown);
     }
 
     #[test]

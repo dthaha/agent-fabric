@@ -21,9 +21,11 @@ use axum::{Json, Router};
 use fabric_context::clock::now_ms;
 use fabric_context::db::ms_to_timestamp;
 use fabric_context::{ContextStore, ReconcileReport, SqliteContextStore, StoreError};
-use fabric_types::context::{ContextEntry, Locus, SessionMeta, SessionState};
-use fabric_types::lease::Lease;
-use serde::Deserialize;
+use fabric_types::context::{Locus, SessionMeta, SessionState};
+use fabric_types::lease::{
+    AcquireLeaseRequest, ActiveLeaseRequest, Lease, PreemptRequest, PresenceRequest,
+    ReleaseLeaseRequest, RenewLeaseRequest, ReplayRequest,
+};
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -81,6 +83,14 @@ pub async fn serve(
     axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown)
         .await
+}
+
+/// Resolve an optional proto-encoded locus to the enum, defaulting to
+/// `Unspecified` for absent or out-of-range values.
+fn locus_or_default(locus: Option<i32>) -> Locus {
+    locus
+        .and_then(|l| Locus::try_from(l).ok())
+        .unwrap_or(Locus::Unspecified)
 }
 
 /// Map a store error onto an HTTP status. Conflicts and holder mismatches
@@ -146,22 +156,12 @@ async fn healthz() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
-#[derive(Debug, Deserialize)]
-struct AcquireRequest {
-    session_id: String,
-    holder_id: String,
-    #[serde(default)]
-    locus: Option<Locus>,
-    #[serde(default)]
-    ttl_ms: Option<i64>,
-}
-
 /// Grant a write lease, server-stamped. 409 while another holder's
 /// unexpired lease is active — preemption (presence) is the way to take
 /// over a live session, never a raw acquire race.
 async fn acquire(
     State(state): State<Arc<ControlState>>,
-    Json(req): Json<AcquireRequest>,
+    Json(req): Json<AcquireLeaseRequest>,
 ) -> Result<Json<Lease>, Response> {
     ensure_session(&state.store, &req.session_id)
         .await
@@ -170,7 +170,7 @@ async fn acquire(
         &state.store,
         &req.session_id,
         &req.holder_id,
-        req.locus.unwrap_or(Locus::Unspecified),
+        locus_or_default(req.locus),
         req.ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS),
     )
     .await
@@ -180,18 +180,6 @@ async fn acquire(
         .map_err(store_err)?;
     info!(session = %req.session_id, holder = %req.holder_id, lease = %lease.lease_id, "lease granted");
     Ok(Json(lease))
-}
-
-#[derive(Debug, Deserialize)]
-struct PreemptRequest {
-    session_id: String,
-    new_holder_id: String,
-    #[serde(default)]
-    reason: String,
-    #[serde(default)]
-    locus: Option<Locus>,
-    #[serde(default)]
-    ttl_ms: Option<i64>,
 }
 
 /// Presence-driven preemption: the surface with the latest server-observed
@@ -206,7 +194,7 @@ async fn preempt(
     ensure_session(&state.store, &req.session_id)
         .await
         .map_err(store_err)?;
-    let locus = req.locus.unwrap_or(Locus::Unspecified);
+    let locus = locus_or_default(req.locus);
     let ttl = req.ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS);
 
     if let Some(old) = ContextStore::active_lease(&state.store, &req.session_id)
@@ -259,19 +247,11 @@ async fn preempt(
     Ok(Json(lease))
 }
 
-#[derive(Debug, Deserialize)]
-struct RenewRequest {
-    lease_id: String,
-    holder_id: String,
-    #[serde(default)]
-    ttl_ms: Option<i64>,
-}
-
 /// Extend an ACTIVE lease's expiry. Holder must match; the new expiry is
 /// stamped with the server clock.
 async fn renew(
     State(state): State<Arc<ControlState>>,
-    Json(req): Json<RenewRequest>,
+    Json(req): Json<RenewLeaseRequest>,
 ) -> Result<Json<Lease>, Response> {
     let store = state.store.clone();
     let ttl = req.ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS);
@@ -284,17 +264,11 @@ async fn renew(
     Ok(Json(lease))
 }
 
-#[derive(Debug, Deserialize)]
-struct ReleaseRequest {
-    session_id: String,
-    holder_id: String,
-}
-
 /// Release the lease at the end of a turn. Holder must match. 204 on
 /// success; the session stays ACTIVE without a writer.
 async fn release(
     State(state): State<Arc<ControlState>>,
-    Json(req): Json<ReleaseRequest>,
+    Json(req): Json<ReleaseLeaseRequest>,
 ) -> Result<StatusCode, Response> {
     ContextStore::release_lease(&state.store, &req.session_id, &req.holder_id)
         .await
@@ -302,15 +276,10 @@ async fn release(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Debug, Deserialize)]
-struct ActiveQuery {
-    session_id: String,
-}
-
 /// The session's ACTIVE lease, or 404 when there is no writer.
 async fn active(
     State(state): State<Arc<ControlState>>,
-    Query(q): Query<ActiveQuery>,
+    Query(q): Query<ActiveLeaseRequest>,
 ) -> Result<Json<Lease>, Response> {
     ContextStore::active_lease(&state.store, &q.session_id)
         .await
@@ -323,14 +292,6 @@ async fn active(
             )
                 .into_response()
         })
-}
-
-#[derive(Debug, Deserialize)]
-struct PresenceRequest {
-    session_id: String,
-    surface_id: String,
-    #[serde(default)]
-    locus: Option<Locus>,
 }
 
 /// A surface reports user activity. Latest server-observed activity wins the
@@ -352,13 +313,6 @@ async fn presence(
         }),
     )
     .await
-}
-
-#[derive(Debug, Deserialize)]
-struct ReplayRequest {
-    session_id: String,
-    #[serde(default)]
-    entries: Vec<ContextEntry>,
 }
 
 /// Offline-reconnect ingest: an endpoint replays its local op-log after an

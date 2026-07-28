@@ -88,6 +88,15 @@ message SafetyConfig {
   FailMode fail_mode = 5;
   repeated SafetyPolicyRule rules = 6;
   SafetyAction default_action = 7;
+  // Bearer token, if the safety endpoint requires one. Empty = no auth.
+  string api_key = 8;
+  // Vendor-specific request body extensions as a JSON object string (same
+  // convention as FABRIC_DECODER_EXTRA_BODY). Merged into the request body;
+  // standard fields cannot be overridden.
+  string extra_body_json = 9;
+  // System prompt override. Empty = the parser's own default
+  // (SafetyParser::default_system_prompt).
+  string system_prompt = 10;
 }
 
 message SafetyPolicyRule {

@@ -30,7 +30,7 @@ Scenarios in `scenarios/` are generated and pinned. To regenerate after
 editing the generator:
 
 ```bash
-python gen_scenarios.py
+python generate_safety_scenarios.py
 ```
 
 ## Layout
@@ -40,5 +40,5 @@ scenarios/decoder/   scored decoder scenarios (DecoderInput + expected relation)
 scenarios/mediator/  scored mediator scenarios (MediatorInput + expected resolution/question)
 prompts/             verbatim copies of the production system prompts
 run_baseline.py      runner/scorer
-gen_scenarios.py     scenario generator (source of truth for scenarios)
+generate_safety_scenarios.py  scenario generator (source of truth for scenarios)
 ```

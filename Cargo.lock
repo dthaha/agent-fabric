@@ -487,8 +487,10 @@ dependencies = [
 name = "fabric-control"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "axum",
  "fabric-context",
+ "fabric-telemetry",
  "fabric-types",
  "pbjson-types",
  "serde",

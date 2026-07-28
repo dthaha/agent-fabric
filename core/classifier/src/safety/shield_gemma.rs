@@ -1,4 +1,6 @@
-use crate::safety::{ParseError, SafetyCategory, SafetyLevel, SafetyParser, SafetyVerdict};
+use crate::safety::{
+    parse_safety_category, ParseError, SafetyCategory, SafetyLevel, SafetyParser, SafetyVerdict,
+};
 
 pub struct ShieldGemmaParser;
 
@@ -15,14 +17,9 @@ impl Default for ShieldGemmaParser {
 }
 
 fn map_category(key: &str) -> Option<SafetyCategory> {
-    match key.trim().to_lowercase().as_str() {
-        "harassment" => Some(SafetyCategory::Violence),
-        "hate_speech" | "hate speech" | "hatespeech" => Some(SafetyCategory::Profanity),
-        "sexually_explicit" | "sexually explicit" | "sexual" => Some(SafetyCategory::SexualContent),
-        "dangerous_content" | "dangerous content" | "dangerous" => {
-            Some(SafetyCategory::IllegalActivity)
-        }
-        _ => None,
+    match parse_safety_category(key) {
+        SafetyCategory::Custom(_) => None,
+        known => Some(known),
     }
 }
 
@@ -30,12 +27,13 @@ impl SafetyParser for ShieldGemmaParser {
     fn parse(&self, raw_output: &str, model_id: &str) -> Result<SafetyVerdict, ParseError> {
         let raw = raw_output.trim();
 
-        let parsed: serde_json::Value = serde_json::from_str(raw)
-            .map_err(|e| ParseError::ParseError(format!("invalid JSON: {e}")))?;
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) else {
+            return Ok(SafetyVerdict::unknown(model_id, raw));
+        };
 
-        let obj = parsed
-            .as_object()
-            .ok_or_else(|| ParseError::ParseError("expected JSON object".into()))?;
+        let Some(obj) = parsed.as_object() else {
+            return Ok(SafetyVerdict::unknown(model_id, raw));
+        };
 
         let mut categories = Vec::new();
         let mut is_unsafe = false;
@@ -132,10 +130,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_invalid_json() {
+    fn parse_invalid_json_returns_unknown() {
         let parser = ShieldGemmaParser::new();
-        let result = parser.parse("not json", "shield-gemma-2b");
-        assert!(result.is_err());
+        let v = parser.parse("not json", "shield-gemma-2b").unwrap();
+        assert_eq!(v.verdict, SafetyLevel::Unknown);
+        assert!(v.categories.is_empty());
     }
 
     #[test]

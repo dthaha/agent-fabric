@@ -1,4 +1,4 @@
-use crate::safety::{ParseError, SafetyCategory, SafetyLevel, SafetyParser, SafetyVerdict};
+use crate::safety::{parse_safety_category, ParseError, SafetyLevel, SafetyParser, SafetyVerdict};
 
 pub struct NemotronContentSafetyParser;
 
@@ -14,37 +14,13 @@ impl Default for NemotronContentSafetyParser {
     }
 }
 
-fn map_category(cat: &str) -> SafetyCategory {
-    let cat = cat.trim();
-    match cat.to_lowercase().as_str() {
-        "criminal planning/confessions" => SafetyCategory::IllegalActivity,
-        "pii/privacy" => SafetyCategory::Pii,
-        "violence" => SafetyCategory::Violence,
-        "sexual content" => SafetyCategory::SexualContent,
-        "self-harm" => SafetyCategory::SelfHarm,
-        "hate speech" => SafetyCategory::Custom("HateSpeech".to_string()),
-        "malware/cybersecurity" => SafetyCategory::Injection,
-        "fraud/deception" => SafetyCategory::Financial,
-        "prompt injection" => SafetyCategory::Injection,
-        _ => SafetyCategory::Custom(cat.to_string()),
-    }
-}
-
-fn unknown_verdict(raw: &str, model_id: &str) -> SafetyVerdict {
-    SafetyVerdict {
-        verdict: SafetyLevel::Unknown,
-        categories: Vec::new(),
-        explanation: None,
-        model_id: model_id.to_string(),
-        raw_output: raw.to_string(),
-    }
-}
+const DEFAULT_SYSTEM_PROMPT: &str = "You are a safety content classifier. Analyze the user's input and determine if it contains unsafe content. Respond in exactly this format:\nUser Safety: safe|unsafe\nSafety Categories: <comma-separated category names, only when unsafe>";
 
 impl SafetyParser for NemotronContentSafetyParser {
     fn parse(&self, raw_output: &str, model_id: &str) -> Result<SafetyVerdict, ParseError> {
         let raw = raw_output.trim();
         if raw.is_empty() {
-            return Ok(unknown_verdict(raw, model_id));
+            return Ok(SafetyVerdict::unknown(model_id, raw));
         }
 
         let mut verdict = None;
@@ -62,7 +38,7 @@ impl SafetyParser for NemotronContentSafetyParser {
                 for cat in value.split(',') {
                     let cat = cat.trim();
                     if !cat.is_empty() {
-                        categories.push(map_category(cat));
+                        categories.push(parse_safety_category(cat));
                     }
                 }
             }
@@ -70,7 +46,7 @@ impl SafetyParser for NemotronContentSafetyParser {
 
         let verdict = match verdict {
             Some(v) => v,
-            None => return Ok(unknown_verdict(raw, model_id)),
+            None => return Ok(SafetyVerdict::unknown(model_id, raw)),
         };
 
         Ok(SafetyVerdict {
@@ -85,11 +61,16 @@ impl SafetyParser for NemotronContentSafetyParser {
     fn name(&self) -> &str {
         "nemotron_cs"
     }
+
+    fn default_system_prompt(&self) -> &str {
+        DEFAULT_SYSTEM_PROMPT
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::safety::SafetyCategory;
 
     #[test]
     fn parse_safe() {
@@ -129,9 +110,9 @@ mod tests {
         let v = parser.parse(output, "nemotron-3.5-content-safety").unwrap();
         assert!(v.categories.contains(&SafetyCategory::SexualContent));
         assert!(v.categories.contains(&SafetyCategory::SelfHarm));
-        assert!(v
-            .categories
-            .contains(&SafetyCategory::Custom("HateSpeech".to_string())));
+        // Hate Speech maps to the canonical Profanity category so it matches
+        // lowercased "profanity" policy rules.
+        assert!(v.categories.contains(&SafetyCategory::Profanity));
         assert!(v.categories.contains(&SafetyCategory::Injection));
         assert!(v.categories.contains(&SafetyCategory::Financial));
     }
@@ -169,5 +150,13 @@ mod tests {
     #[test]
     fn parser_name() {
         assert_eq!(NemotronContentSafetyParser::new().name(), "nemotron_cs");
+    }
+
+    #[test]
+    fn default_system_prompt_instructs_user_safety_format() {
+        let parser = NemotronContentSafetyParser::new();
+        assert!(parser
+            .default_system_prompt()
+            .contains("User Safety: safe|unsafe"));
     }
 }

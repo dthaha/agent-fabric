@@ -7,7 +7,9 @@ repository.workspace = true
 
 [dependencies]
 fabric-context = { path = "../../core/context" }
+fabric-telemetry = { path = "../../core/telemetry" }
 fabric-types = { path = "../../core/types" }
+anyhow.workspace = true
 axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -1,4 +1,247 @@
 // @generated
+impl serde::Serialize for AcquireLeaseRequest {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.session_id.is_empty() {
+            len += 1;
+        }
+        if !self.holder_id.is_empty() {
+            len += 1;
+        }
+        if self.locus.is_some() {
+            len += 1;
+        }
+        if self.ttl_ms.is_some() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.lease.AcquireLeaseRequest", len)?;
+        if !self.session_id.is_empty() {
+            struct_ser.serialize_field("sessionId", &self.session_id)?;
+        }
+        if !self.holder_id.is_empty() {
+            struct_ser.serialize_field("holderId", &self.holder_id)?;
+        }
+        if let Some(v) = self.locus.as_ref() {
+            let v = super::context::Locus::try_from(*v)
+                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", *v)))?;
+            struct_ser.serialize_field("locus", &v)?;
+        }
+        if let Some(v) = self.ttl_ms.as_ref() {
+            #[allow(clippy::needless_borrow)]
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            struct_ser.serialize_field("ttlMs", ToString::to_string(&v).as_str())?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for AcquireLeaseRequest {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "session_id",
+            "sessionId",
+            "holder_id",
+            "holderId",
+            "locus",
+            "ttl_ms",
+            "ttlMs",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            SessionId,
+            HolderId,
+            Locus,
+            TtlMs,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "sessionId" | "session_id" => Ok(GeneratedField::SessionId),
+                            "holderId" | "holder_id" => Ok(GeneratedField::HolderId),
+                            "locus" => Ok(GeneratedField::Locus),
+                            "ttlMs" | "ttl_ms" => Ok(GeneratedField::TtlMs),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = AcquireLeaseRequest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.lease.AcquireLeaseRequest")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<AcquireLeaseRequest, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut session_id__ = None;
+                let mut holder_id__ = None;
+                let mut locus__ = None;
+                let mut ttl_ms__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::SessionId => {
+                            if session_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sessionId"));
+                            }
+                            session_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::HolderId => {
+                            if holder_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("holderId"));
+                            }
+                            holder_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Locus => {
+                            if locus__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("locus"));
+                            }
+                            locus__ = map_.next_value::<::std::option::Option<super::context::Locus>>()?.map(|x| x as i32);
+                        }
+                        GeneratedField::TtlMs => {
+                            if ttl_ms__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("ttlMs"));
+                            }
+                            ttl_ms__ = 
+                                map_.next_value::<::std::option::Option<::pbjson::private::NumberDeserialize<_>>>()?.map(|x| x.0)
+                            ;
+                        }
+                    }
+                }
+                Ok(AcquireLeaseRequest {
+                    session_id: session_id__.unwrap_or_default(),
+                    holder_id: holder_id__.unwrap_or_default(),
+                    locus: locus__,
+                    ttl_ms: ttl_ms__,
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.lease.AcquireLeaseRequest", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for ActiveLeaseRequest {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.session_id.is_empty() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.lease.ActiveLeaseRequest", len)?;
+        if !self.session_id.is_empty() {
+            struct_ser.serialize_field("sessionId", &self.session_id)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ActiveLeaseRequest {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "session_id",
+            "sessionId",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            SessionId,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "sessionId" | "session_id" => Ok(GeneratedField::SessionId),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = ActiveLeaseRequest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.lease.ActiveLeaseRequest")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<ActiveLeaseRequest, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut session_id__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::SessionId => {
+                            if session_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sessionId"));
+                            }
+                            session_id__ = Some(map_.next_value()?);
+                        }
+                    }
+                }
+                Ok(ActiveLeaseRequest {
+                    session_id: session_id__.unwrap_or_default(),
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.lease.ActiveLeaseRequest", FIELDS, GeneratedVisitor)
+    }
+}
 impl serde::Serialize for HandoffAck {
     #[allow(deprecated)]
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -673,5 +916,653 @@ impl<'de> serde::Deserialize<'de> for LeaseState {
             }
         }
         deserializer.deserialize_any(GeneratedVisitor)
+    }
+}
+impl serde::Serialize for PreemptRequest {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.session_id.is_empty() {
+            len += 1;
+        }
+        if !self.new_holder_id.is_empty() {
+            len += 1;
+        }
+        if !self.reason.is_empty() {
+            len += 1;
+        }
+        if self.locus.is_some() {
+            len += 1;
+        }
+        if self.ttl_ms.is_some() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.lease.PreemptRequest", len)?;
+        if !self.session_id.is_empty() {
+            struct_ser.serialize_field("sessionId", &self.session_id)?;
+        }
+        if !self.new_holder_id.is_empty() {
+            struct_ser.serialize_field("newHolderId", &self.new_holder_id)?;
+        }
+        if !self.reason.is_empty() {
+            struct_ser.serialize_field("reason", &self.reason)?;
+        }
+        if let Some(v) = self.locus.as_ref() {
+            let v = super::context::Locus::try_from(*v)
+                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", *v)))?;
+            struct_ser.serialize_field("locus", &v)?;
+        }
+        if let Some(v) = self.ttl_ms.as_ref() {
+            #[allow(clippy::needless_borrow)]
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            struct_ser.serialize_field("ttlMs", ToString::to_string(&v).as_str())?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for PreemptRequest {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "session_id",
+            "sessionId",
+            "new_holder_id",
+            "newHolderId",
+            "reason",
+            "locus",
+            "ttl_ms",
+            "ttlMs",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            SessionId,
+            NewHolderId,
+            Reason,
+            Locus,
+            TtlMs,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "sessionId" | "session_id" => Ok(GeneratedField::SessionId),
+                            "newHolderId" | "new_holder_id" => Ok(GeneratedField::NewHolderId),
+                            "reason" => Ok(GeneratedField::Reason),
+                            "locus" => Ok(GeneratedField::Locus),
+                            "ttlMs" | "ttl_ms" => Ok(GeneratedField::TtlMs),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = PreemptRequest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.lease.PreemptRequest")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<PreemptRequest, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut session_id__ = None;
+                let mut new_holder_id__ = None;
+                let mut reason__ = None;
+                let mut locus__ = None;
+                let mut ttl_ms__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::SessionId => {
+                            if session_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sessionId"));
+                            }
+                            session_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::NewHolderId => {
+                            if new_holder_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("newHolderId"));
+                            }
+                            new_holder_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Reason => {
+                            if reason__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("reason"));
+                            }
+                            reason__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Locus => {
+                            if locus__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("locus"));
+                            }
+                            locus__ = map_.next_value::<::std::option::Option<super::context::Locus>>()?.map(|x| x as i32);
+                        }
+                        GeneratedField::TtlMs => {
+                            if ttl_ms__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("ttlMs"));
+                            }
+                            ttl_ms__ = 
+                                map_.next_value::<::std::option::Option<::pbjson::private::NumberDeserialize<_>>>()?.map(|x| x.0)
+                            ;
+                        }
+                    }
+                }
+                Ok(PreemptRequest {
+                    session_id: session_id__.unwrap_or_default(),
+                    new_holder_id: new_holder_id__.unwrap_or_default(),
+                    reason: reason__.unwrap_or_default(),
+                    locus: locus__,
+                    ttl_ms: ttl_ms__,
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.lease.PreemptRequest", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for PresenceRequest {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.session_id.is_empty() {
+            len += 1;
+        }
+        if !self.surface_id.is_empty() {
+            len += 1;
+        }
+        if self.locus.is_some() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.lease.PresenceRequest", len)?;
+        if !self.session_id.is_empty() {
+            struct_ser.serialize_field("sessionId", &self.session_id)?;
+        }
+        if !self.surface_id.is_empty() {
+            struct_ser.serialize_field("surfaceId", &self.surface_id)?;
+        }
+        if let Some(v) = self.locus.as_ref() {
+            let v = super::context::Locus::try_from(*v)
+                .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", *v)))?;
+            struct_ser.serialize_field("locus", &v)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for PresenceRequest {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "session_id",
+            "sessionId",
+            "surface_id",
+            "surfaceId",
+            "locus",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            SessionId,
+            SurfaceId,
+            Locus,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "sessionId" | "session_id" => Ok(GeneratedField::SessionId),
+                            "surfaceId" | "surface_id" => Ok(GeneratedField::SurfaceId),
+                            "locus" => Ok(GeneratedField::Locus),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = PresenceRequest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.lease.PresenceRequest")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<PresenceRequest, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut session_id__ = None;
+                let mut surface_id__ = None;
+                let mut locus__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::SessionId => {
+                            if session_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sessionId"));
+                            }
+                            session_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::SurfaceId => {
+                            if surface_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("surfaceId"));
+                            }
+                            surface_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Locus => {
+                            if locus__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("locus"));
+                            }
+                            locus__ = map_.next_value::<::std::option::Option<super::context::Locus>>()?.map(|x| x as i32);
+                        }
+                    }
+                }
+                Ok(PresenceRequest {
+                    session_id: session_id__.unwrap_or_default(),
+                    surface_id: surface_id__.unwrap_or_default(),
+                    locus: locus__,
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.lease.PresenceRequest", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for ReleaseLeaseRequest {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.session_id.is_empty() {
+            len += 1;
+        }
+        if !self.holder_id.is_empty() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.lease.ReleaseLeaseRequest", len)?;
+        if !self.session_id.is_empty() {
+            struct_ser.serialize_field("sessionId", &self.session_id)?;
+        }
+        if !self.holder_id.is_empty() {
+            struct_ser.serialize_field("holderId", &self.holder_id)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ReleaseLeaseRequest {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "session_id",
+            "sessionId",
+            "holder_id",
+            "holderId",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            SessionId,
+            HolderId,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "sessionId" | "session_id" => Ok(GeneratedField::SessionId),
+                            "holderId" | "holder_id" => Ok(GeneratedField::HolderId),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = ReleaseLeaseRequest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.lease.ReleaseLeaseRequest")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<ReleaseLeaseRequest, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut session_id__ = None;
+                let mut holder_id__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::SessionId => {
+                            if session_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sessionId"));
+                            }
+                            session_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::HolderId => {
+                            if holder_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("holderId"));
+                            }
+                            holder_id__ = Some(map_.next_value()?);
+                        }
+                    }
+                }
+                Ok(ReleaseLeaseRequest {
+                    session_id: session_id__.unwrap_or_default(),
+                    holder_id: holder_id__.unwrap_or_default(),
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.lease.ReleaseLeaseRequest", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for RenewLeaseRequest {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.lease_id.is_empty() {
+            len += 1;
+        }
+        if !self.holder_id.is_empty() {
+            len += 1;
+        }
+        if self.ttl_ms.is_some() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.lease.RenewLeaseRequest", len)?;
+        if !self.lease_id.is_empty() {
+            struct_ser.serialize_field("leaseId", &self.lease_id)?;
+        }
+        if !self.holder_id.is_empty() {
+            struct_ser.serialize_field("holderId", &self.holder_id)?;
+        }
+        if let Some(v) = self.ttl_ms.as_ref() {
+            #[allow(clippy::needless_borrow)]
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            struct_ser.serialize_field("ttlMs", ToString::to_string(&v).as_str())?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for RenewLeaseRequest {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "lease_id",
+            "leaseId",
+            "holder_id",
+            "holderId",
+            "ttl_ms",
+            "ttlMs",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            LeaseId,
+            HolderId,
+            TtlMs,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "leaseId" | "lease_id" => Ok(GeneratedField::LeaseId),
+                            "holderId" | "holder_id" => Ok(GeneratedField::HolderId),
+                            "ttlMs" | "ttl_ms" => Ok(GeneratedField::TtlMs),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = RenewLeaseRequest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.lease.RenewLeaseRequest")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<RenewLeaseRequest, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut lease_id__ = None;
+                let mut holder_id__ = None;
+                let mut ttl_ms__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::LeaseId => {
+                            if lease_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("leaseId"));
+                            }
+                            lease_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::HolderId => {
+                            if holder_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("holderId"));
+                            }
+                            holder_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::TtlMs => {
+                            if ttl_ms__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("ttlMs"));
+                            }
+                            ttl_ms__ = 
+                                map_.next_value::<::std::option::Option<::pbjson::private::NumberDeserialize<_>>>()?.map(|x| x.0)
+                            ;
+                        }
+                    }
+                }
+                Ok(RenewLeaseRequest {
+                    lease_id: lease_id__.unwrap_or_default(),
+                    holder_id: holder_id__.unwrap_or_default(),
+                    ttl_ms: ttl_ms__,
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.lease.RenewLeaseRequest", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for ReplayRequest {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if !self.session_id.is_empty() {
+            len += 1;
+        }
+        if !self.entries.is_empty() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("fabric.lease.ReplayRequest", len)?;
+        if !self.session_id.is_empty() {
+            struct_ser.serialize_field("sessionId", &self.session_id)?;
+        }
+        if !self.entries.is_empty() {
+            struct_ser.serialize_field("entries", &self.entries)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ReplayRequest {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "session_id",
+            "sessionId",
+            "entries",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            SessionId,
+            Entries,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "sessionId" | "session_id" => Ok(GeneratedField::SessionId),
+                            "entries" => Ok(GeneratedField::Entries),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = ReplayRequest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct fabric.lease.ReplayRequest")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<ReplayRequest, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut session_id__ = None;
+                let mut entries__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::SessionId => {
+                            if session_id__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sessionId"));
+                            }
+                            session_id__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::Entries => {
+                            if entries__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("entries"));
+                            }
+                            entries__ = Some(map_.next_value()?);
+                        }
+                    }
+                }
+                Ok(ReplayRequest {
+                    session_id: session_id__.unwrap_or_default(),
+                    entries: entries__.unwrap_or_default(),
+                })
+            }
+        }
+        deserializer.deserialize_struct("fabric.lease.ReplayRequest", FIELDS, GeneratedVisitor)
     }
 }

@@ -38,6 +38,22 @@ Agent Fabric solves one problem: **strict session context continuity across loci
 - The container image IS the capability manifest — same image at every locus
 - Handoff = transfer write lease + catch-up, NOT summarize-and-restart
 
+## Status: Landed vs Scaffold
+
+| Component | Status | Notes |
+|---|---|---|
+| core/context (conflict pipeline) | ✅ Landed | Op-log, lease, handoff, reconcile, decoder/mediator, eval |
+| core/classifier (safety) | ✅ Landed | Parsers, client, policy enforcer |
+| core/policy | ✅ Landed | Deny-wins merge, veto, compensation |
+| core/tools | ✅ Landed | Dispatch, terminal tool (K8s containers) |
+| core/telemetry | ✅ Landed | OTel + JSON stdout |
+| core/models | 🔨 Partial | Module registry + feature-gated discovery |
+| server/control (lease authority) | ✅ Landed | `fabric-control` bin, axum routes, SQLite store |
+| endpoint/daemon | 🔨 Partial | Health, classify, lease client; safety/pipeline not yet wired |
+| server/agent | 📋 Scaffold | Stub main, lands in a later phase |
+| core/inference, core/runtime, core/memory | 📋 Scaffold | Placeholder crates |
+| sdk/*, admin/, harness/ | 📋 Scaffold | Empty, planned |
+
 ## Repo layout
 
 ```
@@ -113,11 +129,16 @@ All parsers implement the `SafetyParser` trait. Adding a new model = implement o
 // In your endpoint policy pack:
 {
   "safety": {
+    // Base URL, API root, or full path — all three work:
+    // "https://your-inference-cluster", ".../v1", or ".../v1/chat/completions"
     "endpoint_url": "https://your-inference-cluster/v1/chat/completions",
     "model": "ibm-granite/granite-guardian-3.1-2b",
     "parser": "granite_guardian",
     "timeout_ms": 5000,
-    "fail_mode": "closed"  // "closed" = block on error, "open" = allow on error
+    "fail_mode": "closed",  // "closed" = block on error, "open" = allow on error
+    "api_key": "",          // optional Bearer token for the safety endpoint
+    "extra_body_json": "",  // optional JSON object of vendor request extensions
+    "system_prompt": ""     // optional override; empty = parser's default
   }
 }
 ```
@@ -143,7 +164,7 @@ Runtime discovery: `fabric_models::available_modules()` returns the `ModuleInfo`
 
 **Adding a custom module:** implement the relevant trait (`SafetyParser`, `ConflictDecoder`, or `ConflictMediator`) in your own crate, construct it where the pipeline is built, and point it at your endpoint. No fork required.
 
-**Certification:** the eval suite in `eval/` is the conformance bar. A module is "first-class" when it ships behind a feature flag AND passes its task's eval harness with results committed to `eval/results/`.
+**Certification:** the eval suite in `eval/` is the conformance bar. A module is "first-class" when it ships behind a feature flag AND passes its task's eval harness. Eval results are generated locally and gitignored — run the suite yourself to produce them.
 
 ## Extensibility
 
@@ -159,7 +180,7 @@ The fabric has exactly three scoped inference tasks, each a single pluggable tra
 
 **Feature flag stripping for regulated environments:** every first-class module is gated behind a Cargo feature. Build with `--no-default-features --features safety-llama-guard` (for example) to produce a binary containing only the approved module — the stripped code is not in the artifact at all, which is auditable in a way runtime config is not.
 
-**The eval harness as a conformance test:** `eval/` contains the scenario suites and runners for all three tasks. Run your implementation against the same scenarios; if it passes, it conforms. Eval results for first-class modules are committed under `eval/results/`.
+**The eval harness as a conformance test:** `eval/` contains the scenario suites and runners for all three tasks. Run your implementation against the same scenarios; if it passes, it conforms. Eval results are generated locally and gitignored — run the suite yourself to produce them.
 
 ## Tool plane
 

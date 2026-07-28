@@ -127,6 +127,18 @@ pub struct SafetyConfig {
     pub rules: ::prost::alloc::vec::Vec<SafetyPolicyRule>,
     #[prost(enumeration="SafetyAction", tag="7")]
     pub default_action: i32,
+    /// Bearer token, if the safety endpoint requires one. Empty = no auth.
+    #[prost(string, tag="8")]
+    pub api_key: ::prost::alloc::string::String,
+    /// Vendor-specific request body extensions as a JSON object string (same
+    /// convention as FABRIC_DECODER_EXTRA_BODY). Merged into the request body;
+    /// standard fields cannot be overridden.
+    #[prost(string, tag="9")]
+    pub extra_body_json: ::prost::alloc::string::String,
+    /// System prompt override. Empty = the parser's own default
+    /// (SafetyParser::default_system_prompt).
+    #[prost(string, tag="10")]
+    pub system_prompt: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

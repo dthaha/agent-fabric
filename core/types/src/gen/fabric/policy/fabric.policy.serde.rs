@@ -1730,6 +1730,15 @@ impl serde::Serialize for SafetyConfig {
         if self.default_action != 0 {
             len += 1;
         }
+        if !self.api_key.is_empty() {
+            len += 1;
+        }
+        if !self.extra_body_json.is_empty() {
+            len += 1;
+        }
+        if !self.system_prompt.is_empty() {
+            len += 1;
+        }
         let mut struct_ser = serializer.serialize_struct("fabric.policy.SafetyConfig", len)?;
         if !self.endpoint_url.is_empty() {
             struct_ser.serialize_field("endpointUrl", &self.endpoint_url)?;
@@ -1756,6 +1765,15 @@ impl serde::Serialize for SafetyConfig {
                 .map_err(|_| serde::ser::Error::custom(format!("Invalid variant {}", self.default_action)))?;
             struct_ser.serialize_field("defaultAction", &v)?;
         }
+        if !self.api_key.is_empty() {
+            struct_ser.serialize_field("apiKey", &self.api_key)?;
+        }
+        if !self.extra_body_json.is_empty() {
+            struct_ser.serialize_field("extraBodyJson", &self.extra_body_json)?;
+        }
+        if !self.system_prompt.is_empty() {
+            struct_ser.serialize_field("systemPrompt", &self.system_prompt)?;
+        }
         struct_ser.end()
     }
 }
@@ -1777,6 +1795,12 @@ impl<'de> serde::Deserialize<'de> for SafetyConfig {
             "rules",
             "default_action",
             "defaultAction",
+            "api_key",
+            "apiKey",
+            "extra_body_json",
+            "extraBodyJson",
+            "system_prompt",
+            "systemPrompt",
         ];
 
         #[allow(clippy::enum_variant_names)]
@@ -1788,6 +1812,9 @@ impl<'de> serde::Deserialize<'de> for SafetyConfig {
             FailMode,
             Rules,
             DefaultAction,
+            ApiKey,
+            ExtraBodyJson,
+            SystemPrompt,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
             fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
@@ -1816,6 +1843,9 @@ impl<'de> serde::Deserialize<'de> for SafetyConfig {
                             "failMode" | "fail_mode" => Ok(GeneratedField::FailMode),
                             "rules" => Ok(GeneratedField::Rules),
                             "defaultAction" | "default_action" => Ok(GeneratedField::DefaultAction),
+                            "apiKey" | "api_key" => Ok(GeneratedField::ApiKey),
+                            "extraBodyJson" | "extra_body_json" => Ok(GeneratedField::ExtraBodyJson),
+                            "systemPrompt" | "system_prompt" => Ok(GeneratedField::SystemPrompt),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
                     }
@@ -1842,6 +1872,9 @@ impl<'de> serde::Deserialize<'de> for SafetyConfig {
                 let mut fail_mode__ = None;
                 let mut rules__ = None;
                 let mut default_action__ = None;
+                let mut api_key__ = None;
+                let mut extra_body_json__ = None;
+                let mut system_prompt__ = None;
                 while let Some(k) = map_.next_key()? {
                     match k {
                         GeneratedField::EndpointUrl => {
@@ -1888,6 +1921,24 @@ impl<'de> serde::Deserialize<'de> for SafetyConfig {
                             }
                             default_action__ = Some(map_.next_value::<SafetyAction>()? as i32);
                         }
+                        GeneratedField::ApiKey => {
+                            if api_key__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("apiKey"));
+                            }
+                            api_key__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::ExtraBodyJson => {
+                            if extra_body_json__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("extraBodyJson"));
+                            }
+                            extra_body_json__ = Some(map_.next_value()?);
+                        }
+                        GeneratedField::SystemPrompt => {
+                            if system_prompt__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("systemPrompt"));
+                            }
+                            system_prompt__ = Some(map_.next_value()?);
+                        }
                     }
                 }
                 Ok(SafetyConfig {
@@ -1898,6 +1949,9 @@ impl<'de> serde::Deserialize<'de> for SafetyConfig {
                     fail_mode: fail_mode__.unwrap_or_default(),
                     rules: rules__.unwrap_or_default(),
                     default_action: default_action__.unwrap_or_default(),
+                    api_key: api_key__.unwrap_or_default(),
+                    extra_body_json: extra_body_json__.unwrap_or_default(),
+                    system_prompt: system_prompt__.unwrap_or_default(),
                 })
             }
         }

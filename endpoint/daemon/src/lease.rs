@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use fabric_types::context::{ContextEntry, Locus};
-use fabric_types::lease::Lease;
-use serde::Serialize;
+use fabric_types::lease::{
+    AcquireLeaseRequest, Lease, ReleaseLeaseRequest, RenewLeaseRequest, ReplayRequest,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -38,33 +39,6 @@ pub struct LeaseClient {
     holder_id: String,
 }
 
-#[derive(Serialize)]
-struct AcquireBody<'a> {
-    session_id: &'a str,
-    holder_id: &'a str,
-    locus: Locus,
-    ttl_ms: i64,
-}
-
-#[derive(Serialize)]
-struct RenewBody<'a> {
-    lease_id: &'a str,
-    holder_id: &'a str,
-    ttl_ms: i64,
-}
-
-#[derive(Serialize)]
-struct ReleaseBody<'a> {
-    session_id: &'a str,
-    holder_id: &'a str,
-}
-
-#[derive(Serialize)]
-struct ReplayBody<'a> {
-    session_id: &'a str,
-    entries: &'a [ContextEntry],
-}
-
 impl LeaseClient {
     pub fn new(base_url: &str, holder_id: &str) -> Self {
         Self {
@@ -81,11 +55,11 @@ impl LeaseClient {
         let lease = self
             .http
             .post(format!("{}/lease/acquire", self.base_url))
-            .json(&AcquireBody {
-                session_id,
-                holder_id: &self.holder_id,
-                locus: Locus::Endpoint,
-                ttl_ms,
+            .json(&AcquireLeaseRequest {
+                session_id: session_id.to_string(),
+                holder_id: self.holder_id.clone(),
+                locus: Some(Locus::Endpoint as i32),
+                ttl_ms: Some(ttl_ms),
             })
             .send()
             .await
@@ -104,10 +78,10 @@ impl LeaseClient {
         let lease = self
             .http
             .post(format!("{}/lease/renew", self.base_url))
-            .json(&RenewBody {
-                lease_id,
-                holder_id: &self.holder_id,
-                ttl_ms,
+            .json(&RenewLeaseRequest {
+                lease_id: lease_id.to_string(),
+                holder_id: self.holder_id.clone(),
+                ttl_ms: Some(ttl_ms),
             })
             .send()
             .await
@@ -127,9 +101,9 @@ impl LeaseClient {
     pub async fn release(&self, session_id: &str) -> Result<()> {
         self.http
             .delete(format!("{}/lease/release", self.base_url))
-            .json(&ReleaseBody {
-                session_id,
-                holder_id: &self.holder_id,
+            .json(&ReleaseLeaseRequest {
+                session_id: session_id.to_string(),
+                holder_id: self.holder_id.clone(),
             })
             .send()
             .await
@@ -149,9 +123,9 @@ impl LeaseClient {
         let report = self
             .http
             .post(format!("{}/context/replay", self.base_url))
-            .json(&ReplayBody {
-                session_id,
-                entries,
+            .json(&ReplayRequest {
+                session_id: session_id.to_string(),
+                entries: entries.to_vec(),
             })
             .send()
             .await

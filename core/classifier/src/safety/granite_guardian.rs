@@ -1,4 +1,6 @@
-use crate::safety::{ParseError, SafetyCategory, SafetyLevel, SafetyParser, SafetyVerdict};
+use crate::safety::{
+    parse_safety_category, ParseError, SafetyCategory, SafetyLevel, SafetyParser, SafetyVerdict,
+};
 
 pub struct GraniteGuardianParser;
 
@@ -15,17 +17,9 @@ impl Default for GraniteGuardianParser {
 }
 
 fn map_category(cat: &str) -> Option<SafetyCategory> {
-    match cat.trim().to_lowercase().as_str() {
-        "harm" | "violence" => Some(SafetyCategory::Violence),
-        "pii" => Some(SafetyCategory::Pii),
-        "injection" | "prompt_injection" => Some(SafetyCategory::Injection),
-        "profanity" | "hate" | "toxic" => Some(SafetyCategory::Profanity),
-        "sexual" | "sexual_content" => Some(SafetyCategory::SexualContent),
-        "financial" => Some(SafetyCategory::Financial),
-        "self_harm" | "self-harm" => Some(SafetyCategory::SelfHarm),
-        "illegal" | "illegal_activity" | "criminal" => Some(SafetyCategory::IllegalActivity),
-        "minor" | "minor_safety" => Some(SafetyCategory::MinorSafety),
-        _ => None,
+    match parse_safety_category(cat) {
+        SafetyCategory::Custom(_) => None,
+        known => Some(known),
     }
 }
 
@@ -89,11 +83,11 @@ impl SafetyParser for GraniteGuardianParser {
     fn parse(&self, raw_output: &str, model_id: &str) -> Result<SafetyVerdict, ParseError> {
         let raw = raw_output.trim();
 
-        let (verdict, categories) = parse_structured_json(raw)
-            .or_else(|| parse_text_output(raw))
-            .ok_or_else(|| {
-                ParseError::ParseError("unrecognized Granite Guardian output format".into())
-            })?;
+        let Some((verdict, categories)) =
+            parse_structured_json(raw).or_else(|| parse_text_output(raw))
+        else {
+            return Ok(SafetyVerdict::unknown(model_id, raw));
+        };
 
         Ok(SafetyVerdict {
             verdict,
@@ -150,10 +144,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_unknown_output() {
+    fn parse_unknown_output_returns_unknown() {
         let parser = GraniteGuardianParser::new();
-        let result = parser.parse("garbage output", "granite-guardian-3.0");
-        assert!(result.is_err());
+        let v = parser
+            .parse("garbage output", "granite-guardian-3.0")
+            .unwrap();
+        assert_eq!(v.verdict, SafetyLevel::Unknown);
+        assert!(v.categories.is_empty());
     }
 
     #[test]
