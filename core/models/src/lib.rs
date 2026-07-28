@@ -13,7 +13,7 @@ pub use fabric_types::modules::{ModuleInfo, ModuleTask};
 /// Each entry is gated by the corresponding Cargo feature; stripping a
 /// feature (e.g. for regulated environments) removes the module from this
 /// list and from the compiled artifact.
-#[allow(clippy::vec_init_then_push)]
+#[allow(clippy::vec_init_then_push, unused_mut)]
 pub fn available_modules() -> Vec<ModuleInfo> {
     let mut modules = Vec::new();
 
@@ -93,8 +93,20 @@ mod tests {
     #[test]
     fn module_tasks_cover_scoped_tasks() {
         let modules = available_modules();
+
+        // With no features enabled, the list is legitimately empty.
+        #[cfg(any(
+            feature = "safety-nemotron-cs",
+            feature = "safety-llama-guard",
+            feature = "safety-granite-guardian",
+            feature = "safety-shield-gemma",
+        ))]
         assert!(modules.iter().any(|m| m.task == ModuleTask::Safety));
+
+        #[cfg(feature = "decoder-nemotron")]
         assert!(modules.iter().any(|m| m.task == ModuleTask::Decoder));
+
+        #[cfg(feature = "mediator-nemotron")]
         assert!(modules.iter().any(|m| m.task == ModuleTask::Mediator));
     }
 }
