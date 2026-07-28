@@ -5,7 +5,9 @@
 
 pub mod clock;
 pub mod conflict;
+#[cfg(feature = "decoder-nemotron")]
 pub mod constrained_decoder;
+#[cfg(feature = "mediator-nemotron")]
 pub mod constrained_mediator;
 pub mod db;
 pub mod decoder;
@@ -21,10 +23,12 @@ pub use clock::{is_clock_sane, now_ms, MonotonicClock};
 pub use conflict::{
     detect_in_region, detect_pair, StructuralConflict, StructuralDisposition, StructuralVerdict,
 };
+#[cfg(feature = "decoder-nemotron")]
 pub use constrained_decoder::{
     verdict_json_schema, ConstrainedDecoder, ConstrainedDecoderConfig,
     SYSTEM_PROMPT as DECODER_SYSTEM_PROMPT,
 };
+#[cfg(feature = "mediator-nemotron")]
 pub use constrained_mediator::{
     proposal_json_schema, ConstrainedMediator, ConstrainedMediatorConfig,
     SYSTEM_PROMPT as MEDIATOR_SYSTEM_PROMPT,

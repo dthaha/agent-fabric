@@ -35,3 +35,5 @@ pub mod conflict {
     include!("gen/fabric.conflict.rs");
     include!("gen/fabric/conflict/fabric.conflict.serde.rs");
 }
+
+pub mod modules;

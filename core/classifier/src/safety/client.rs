@@ -1,14 +1,24 @@
-use crate::safety::{
-    granite_guardian::GraniteGuardianParser, llama_guard::LlamaGuardParser,
-    shield_gemma::ShieldGemmaParser, SafetyError, SafetyParser, SafetyVerdict,
-};
+#[cfg(feature = "safety-granite-guardian")]
+use crate::safety::granite_guardian::GraniteGuardianParser;
+#[cfg(feature = "safety-llama-guard")]
+use crate::safety::llama_guard::LlamaGuardParser;
+#[cfg(feature = "safety-nemotron-cs")]
+use crate::safety::nemotron_cs::NemotronContentSafetyParser;
+#[cfg(feature = "safety-shield-gemma")]
+use crate::safety::shield_gemma::ShieldGemmaParser;
+use crate::safety::{SafetyError, SafetyParser, SafetyVerdict};
 
 use fabric_types::policy::SafetyConfig;
 
 pub fn parser_from_name(name: &str) -> Result<Box<dyn SafetyParser>, String> {
     match name {
+        #[cfg(feature = "safety-granite-guardian")]
         "granite_guardian" => Ok(Box::new(GraniteGuardianParser::new())),
+        #[cfg(feature = "safety-llama-guard")]
         "llama_guard" => Ok(Box::new(LlamaGuardParser::new())),
+        #[cfg(feature = "safety-nemotron-cs")]
+        "nemotron_cs" => Ok(Box::new(NemotronContentSafetyParser::new())),
+        #[cfg(feature = "safety-shield-gemma")]
         "shield_gemma" => Ok(Box::new(ShieldGemmaParser::new())),
         other => Err(format!("unknown safety parser: '{other}'")),
     }
@@ -122,8 +132,13 @@ mod tests {
 
     #[test]
     fn parser_from_name_known() {
+        #[cfg(feature = "safety-granite-guardian")]
         assert!(parser_from_name("granite_guardian").is_ok());
+        #[cfg(feature = "safety-llama-guard")]
         assert!(parser_from_name("llama_guard").is_ok());
+        #[cfg(feature = "safety-nemotron-cs")]
+        assert!(parser_from_name("nemotron_cs").is_ok());
+        #[cfg(feature = "safety-shield-gemma")]
         assert!(parser_from_name("shield_gemma").is_ok());
     }
 

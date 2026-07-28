@@ -633,6 +633,9 @@ dependencies = [
 name = "fabric-models"
 version = "0.1.0"
 dependencies = [
+ "fabric-classifier",
+ "fabric-context",
+ "fabric-types",
  "serde",
  "thiserror",
  "tracing",

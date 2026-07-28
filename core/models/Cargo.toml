@@ -5,7 +5,25 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = [
+    "safety-nemotron-cs",
+    "safety-llama-guard",
+    "safety-granite-guardian",
+    "decoder-nemotron",
+    "mediator-nemotron",
+]
+safety-nemotron-cs = ["fabric-classifier/safety-nemotron-cs"]
+safety-llama-guard = ["fabric-classifier/safety-llama-guard"]
+safety-granite-guardian = ["fabric-classifier/safety-granite-guardian"]
+safety-shield-gemma = ["fabric-classifier/safety-shield-gemma"]
+decoder-nemotron = ["fabric-context/decoder-nemotron"]
+mediator-nemotron = ["fabric-context/mediator-nemotron"]
+
 [dependencies]
+fabric-classifier = { path = "../classifier" }
+fabric-context = { path = "../context" }
+fabric-types = { path = "../types" }
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

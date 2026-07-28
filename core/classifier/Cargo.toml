@@ -5,6 +5,13 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["safety-nemotron-cs", "safety-llama-guard", "safety-granite-guardian"]
+safety-nemotron-cs = []
+safety-llama-guard = []
+safety-granite-guardian = []
+safety-shield-gemma = []
+
 [dependencies]
 fabric-policy = { path = "../policy" }
 fabric-types = { path = "../types" }

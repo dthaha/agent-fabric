@@ -126,6 +126,41 @@ All parsers implement the `SafetyParser` trait. Adding a new model = implement o
 
 When the endpoint daemon runs client-side, the safety model is seeded locally via the model catalog and inferred on-device through llama.cpp. Same `SafetyVerdict` schema, same policy rules — but inference is local, no round-trip to the server. The endpoint never calls home to decide if content is safe.
 
+## Model Modules
+
+First-class model modules compile into the binary via Cargo features. Each module implements one of the three scoped inference traits (safety parser, conflict decoder, conflict mediator) and is enabled by default; strip a feature to remove the module from the build entirely.
+
+| Module | Model | Task | Feature flag | Eval results (July 2026) |
+|---|---|---|---|---|
+| `nemotron_cs` | NVIDIA Nemotron 3.5 Content Safety | Content safety | `safety-nemotron-cs` | 100% recall, 97.3% precision, F1 0.986 (60 scenarios) |
+| `llama_guard` | Meta Llama Guard 4 12B | Content safety | `safety-llama-guard` | 89.5% recall, 94.4% precision, F1 0.919, 0.33s p50 |
+| `granite_guardian` | IBM Granite Guardian 3.x | Content safety | `safety-granite-guardian` | See `eval/results/` |
+| `shield_gemma` | Google ShieldGemma 2B | Content safety | `safety-shield-gemma` (off by default) | See `eval/results/` |
+| `constrained_decoder` | NVIDIA Nemotron 3 Nano 30B A3B | Conflict decoder (Tier 2) | `decoder-nemotron` | 65.3% accuracy, 100% schema compliance (`reasoning: none`) |
+| `constrained_mediator` | NVIDIA Nemotron 3 Nano 30B A3B | Conflict mediator (Tier 3) | `mediator-nemotron` | 54.4% resolution, 84.8% kind accuracy (`reasoning: high`) |
+
+Runtime discovery: `fabric_models::available_modules()` returns the `ModuleInfo` for every module compiled into the current binary, so pipelines and admin tooling can enumerate what's actually present.
+
+**Adding a custom module:** implement the relevant trait (`SafetyParser`, `ConflictDecoder`, or `ConflictMediator`) in your own crate, construct it where the pipeline is built, and point it at your endpoint. No fork required.
+
+**Certification:** the eval suite in `eval/` is the conformance bar. A module is "first-class" when it ships behind a feature flag AND passes its task's eval harness with results committed to `eval/results/`.
+
+## Extensibility
+
+The fabric has exactly three scoped inference tasks, each a single pluggable trait:
+
+| Task | Trait | Crate |
+|---|---|---|
+| Content safety | `SafetyParser` | `fabric-classifier` |
+| Conflict decoder (Tier 2) | `ConflictDecoder` | `fabric-context` |
+| Conflict mediator (Tier 3) | `ConflictMediator` | `fabric-context` |
+
+**Bring your own model:** implement the trait, point it at your inference endpoint (OpenAI-compatible, NIM, vLLM, Bedrock, Foundry — anything), and wire it into your binary. The traits are small and stable; the eval harness treats your implementation exactly like a first-class module.
+
+**Feature flag stripping for regulated environments:** every first-class module is gated behind a Cargo feature. Build with `--no-default-features --features safety-llama-guard` (for example) to produce a binary containing only the approved module — the stripped code is not in the artifact at all, which is auditable in a way runtime config is not.
+
+**The eval harness as a conformance test:** `eval/` contains the scenario suites and runners for all three tasks. Run your implementation against the same scenarios; if it passes, it conforms. Eval results for first-class modules are committed under `eval/results/`.
+
 ## Tool plane
 
 Tools behave the same way regardless of where the brain runs. The brain calls `execute(ToolRequest)` and gets a `ToolResponse`. It never knows whether the tool ran on the endpoint or in a server-side container.

@@ -1,10 +1,17 @@
 pub mod client;
+#[cfg(feature = "safety-granite-guardian")]
 pub mod granite_guardian;
+#[cfg(feature = "safety-llama-guard")]
 pub mod llama_guard;
+#[cfg(feature = "safety-nemotron-cs")]
+pub mod nemotron_cs;
 pub mod policy;
+#[cfg(feature = "safety-shield-gemma")]
 pub mod shield_gemma;
 
 pub use client::SafetyClient;
+#[cfg(feature = "safety-nemotron-cs")]
+pub use nemotron_cs::NemotronContentSafetyParser;
 pub use policy::SafetyPolicyEnforcer;
 
 use thiserror::Error;
