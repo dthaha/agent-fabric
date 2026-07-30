@@ -6,7 +6,7 @@
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::db::{Result, StoreError};
+use crate::db::{now_ms, timestamp_to_ms, Result, StoreError};
 use crate::store::{ContextStore, LeaseAuthority};
 use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionState};
 use fabric_types::lease::{HandoffAck, HandoffRequest, Lease};
@@ -17,6 +17,12 @@ use fabric_types::lease::{HandoffAck, HandoffRequest, Lease};
 /// 2-5+ minutes, so the TTL is deliberately generous: it only fires when a
 /// holder crashes without releasing.
 pub const DEFAULT_LEASE_TTL_MS: i64 = 3_600_000;
+
+/// How long a HANDED_OFF session waits for [`ack_handoff`] before it may be
+/// recovered via [`abort_handoff`]. Without an abort path, a new holder that
+/// crashes after the transfer but before acking would wedge the session in
+/// HANDED_OFF forever — appends are rejected in that state.
+pub const DEFAULT_HANDOFF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Execute a handoff from the current lease holder to a new holder.
 ///
@@ -69,18 +75,18 @@ pub async fn execute_handoff(
     };
     store.append_entry(&mut marker).await?;
 
-    // 2. Transfer the lease: release the old holder's turn-scoped lease,
-    //    then the new holder acquires fresh, pinned to the freeze point.
-    store
-        .release_lease(&request.session_id, &request.from_holder)
-        .await?;
-
-    let mut new_lease = store
-        .acquire_lease(&request.session_id, &request.to_holder, to_locus, ttl_ms)
-        .await?;
-    new_lease.granted_seq = freeze_seq;
-    store
-        .set_granted_seq(&new_lease.lease_id, freeze_seq)
+    // 2. Transfer the lease atomically: the old holder's lease is released
+    //    and the new holder's granted (pinned to the freeze point) in ONE
+    //    transaction, so a failure here never leaves the session writerless.
+    let new_lease = store
+        .transfer_lease(
+            &request.session_id,
+            &request.from_holder,
+            &request.to_holder,
+            to_locus,
+            ttl_ms,
+            freeze_seq,
+        )
         .await?;
     store
         .set_session_state(&request.session_id, SessionState::HandedOff as i32)
@@ -137,21 +143,89 @@ pub async fn ack_handoff(
     Ok(())
 }
 
+/// Abort a handoff whose ack never arrived. Transitions the session from
+/// HANDED_OFF back to ACTIVE so appends are accepted again (the new holder's
+/// lease — granted by the transfer — is still ACTIVE and becomes usable, and
+/// preemption remains available as the escape hatch).
+///
+/// The abort is only honored once `timeout` has elapsed since the session
+/// entered HANDED_OFF (stamped into `last_activity` by the state change):
+/// aborting an in-flight handoff that is merely slow would race a legitimate
+/// ack. Fails with [`StoreError::InvalidTransition`] when the session is not
+/// HANDED_OFF or the timeout has not yet elapsed.
+pub async fn abort_handoff(
+    store: &impl ContextStore,
+    session_id: &str,
+    timeout: std::time::Duration,
+) -> Result<()> {
+    let session = store.session(session_id).await?;
+    if session.state != SessionState::HandedOff as i32 {
+        return Err(StoreError::InvalidTransition(format!(
+            "session {session_id} is not HANDED_OFF (state = {}); abort rejected",
+            crate::db::session_state_name(session.state),
+        )));
+    }
+    let elapsed_ms = now_ms() - timestamp_to_ms(session.last_activity.as_ref());
+    let timeout_ms = i64::try_from(timeout.as_millis()).unwrap_or(i64::MAX);
+    if elapsed_ms < timeout_ms {
+        return Err(StoreError::InvalidTransition(format!(
+            "handoff for session {session_id} is still within the ack timeout \
+             ({elapsed_ms}ms < {timeout_ms}ms); abort rejected"
+        )));
+    }
+    store
+        .set_session_state(session_id, SessionState::Active as i32)
+        .await?;
+    Ok(())
+}
+
+/// Catch-up failure. Divergence is NOT a store error: it means the two
+/// replicas wrote different entries at the same seq while partitioned and
+/// the caller must run [`crate::reconcile`] instead of raw catch-up.
+#[derive(Debug, thiserror::Error)]
+pub enum CatchUpError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error("divergent entry at seq {seq}: target has {local_id}, source has {remote_id}")]
+    Divergent {
+        seq: u64,
+        local_id: String,
+        remote_id: String,
+    },
+}
+
 /// Replay entries the new holder missed while offline into its local store.
 /// Returns the sequence the target is now caught up to.
+///
+/// Every source entry is checked, not just those above the target's head:
+/// if the target appended its own entries while partitioned, divergence can
+/// sit BELOW the head. Stops with [`CatchUpError::Divergent`] when the
+/// target holds a DIFFERENT entry at a seq the source occupies — a raw
+/// insert would fail on the (session_id, seq) primary key, and silently
+/// skipping it would fork the log. The caller decides: run reconcile to
+/// merge deterministically.
 pub async fn catch_up(
     source: &impl ContextStore,
     target: &impl ContextStore,
     session_id: &str,
-) -> Result<u64> {
-    let target_head = target.head_seq(session_id).await?;
-    let missing = source.entries_since(session_id, target_head).await?;
-    for entry in &missing {
-        if target.entry_by_id(&entry.entry_id).await?.is_none() {
-            target.insert_entry_raw(entry).await?;
+) -> std::result::Result<u64, CatchUpError> {
+    let source_entries = source.entries_since(session_id, 0).await?;
+    for entry in &source_entries {
+        if target.entry_by_id(&entry.entry_id).await?.is_some() {
+            continue;
         }
+        if let Some(existing) = target.entry_at_seq(session_id, entry.seq).await? {
+            if existing.entry_id != entry.entry_id {
+                return Err(CatchUpError::Divergent {
+                    seq: entry.seq,
+                    local_id: existing.entry_id,
+                    remote_id: entry.entry_id.clone(),
+                });
+            }
+        }
+        target.insert_entry_raw(entry).await?;
     }
-    source.head_seq(session_id).await
+    Ok(source.head_seq(session_id).await?)
 }
 
 #[cfg(test)]
@@ -373,5 +447,137 @@ mod tests {
         assert_eq!(target.head_seq("s1").unwrap(), 4);
         // Re-running is a no-op (idempotent).
         assert_eq!(catch_up(&source, &target, "s1").await.unwrap(), 4);
+    }
+
+    #[tokio::test]
+    async fn catch_up_stops_on_divergence() {
+        let (source, _old) = setup();
+        for i in 1..=4 {
+            let mut e = test_entry(&format!("e{i}"), "s1", "endpoint-1");
+            source.append_entry(&mut e).unwrap();
+        }
+
+        // Target has the first two entries, then wrote its OWN entry at
+        // seq 3 while partitioned — the replicas have diverged.
+        let target = SqliteContextStore::open_in_memory().unwrap();
+        target.create_session(&test_session("s1")).unwrap();
+        for e in source.entries_since("s1", 0).unwrap().into_iter().take(2) {
+            target.insert_entry_raw(&e).unwrap();
+        }
+        let mut rogue = test_entry("local-3", "s1", "endpoint-1");
+        rogue.seq = 3;
+        target.insert_entry_raw(&rogue).unwrap();
+
+        // Catch-up refuses to paper over the fork: the caller must run
+        // reconcile instead of getting a raw sqlite PK violation.
+        let err = catch_up(&source, &target, "s1").await.unwrap_err();
+        match err {
+            CatchUpError::Divergent {
+                seq,
+                local_id,
+                remote_id,
+            } => {
+                assert_eq!(seq, 3);
+                assert_eq!(local_id, "local-3");
+                assert_eq!(remote_id, "e3");
+            }
+            other => panic!("expected divergence, got {other}"),
+        }
+        // Nothing at or past the divergence was inserted.
+        assert!(target.entry_by_id("e3").unwrap().is_none());
+        assert!(target.entry_by_id("e4").unwrap().is_none());
+        assert_eq!(target.head_seq("s1").unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn failed_handoff_leaves_session_writer_intact() {
+        let (store, old) = setup();
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        store.append_entry(&mut e1).unwrap();
+
+        // A freeze point beyond the head fails BEFORE any mutation: no
+        // marker, no transfer, session still ACTIVE with the old writer.
+        let req = HandoffRequest {
+            session_id: "s1".into(),
+            from_holder: "endpoint-1".into(),
+            to_holder: "server-1".into(),
+            freeze_at_seq: 5,
+            reason: String::new(),
+        };
+        assert!(matches!(
+            execute_handoff(&store, &req, Locus::Server, DEFAULT_LEASE_TTL_MS).await,
+            Err(StoreError::InvalidTransition(_))
+        ));
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::Active as i32
+        );
+        assert_eq!(
+            store.active_lease("s1").unwrap().unwrap().lease_id,
+            old.lease_id
+        );
+        assert_eq!(store.head_seq("s1").unwrap(), 1, "no marker appended");
+        let mut e2 = test_entry("e2", "s1", "endpoint-1");
+        assert_eq!(store.append_entry(&mut e2).unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn abort_handoff_recovers_unacked_session_after_timeout() {
+        let (store, _old) = setup();
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        store.append_entry(&mut e1).unwrap();
+
+        let req = HandoffRequest {
+            session_id: "s1".into(),
+            from_holder: "endpoint-1".into(),
+            to_holder: "server-1".into(),
+            freeze_at_seq: 1,
+            reason: String::new(),
+        };
+        let new_lease = execute_handoff(&store, &req, Locus::Server, DEFAULT_LEASE_TTL_MS)
+            .await
+            .unwrap();
+
+        // The new holder crashes before acking. Aborting INSIDE the ack
+        // timeout is rejected — a slow-but-alive ack must not race an abort.
+        assert!(matches!(
+            abort_handoff(&store, "s1", DEFAULT_HANDOFF_TIMEOUT).await,
+            Err(StoreError::InvalidTransition(_))
+        ));
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::HandedOff as i32
+        );
+
+        // Once the timeout has elapsed (zero here), abort recovers the
+        // session: HANDED_OFF -> ACTIVE. The transferred lease is still
+        // ACTIVE, so the new holder can write as soon as it is back.
+        abort_handoff(&store, "s1", std::time::Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::Active as i32
+        );
+        assert_eq!(
+            store.active_lease("s1").unwrap().unwrap().lease_id,
+            new_lease.lease_id
+        );
+        let mut e = test_entry("e5", "s1", "server-1");
+        assert_eq!(store.append_entry(&mut e).unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn abort_handoff_rejects_non_handed_off_session() {
+        let (store, _old) = setup();
+        // ACTIVE session: there is nothing to abort.
+        assert!(matches!(
+            abort_handoff(&store, "s1", std::time::Duration::ZERO).await,
+            Err(StoreError::InvalidTransition(_))
+        ));
+        assert_eq!(
+            store.session("s1").unwrap().state,
+            SessionState::Active as i32
+        );
     }
 }

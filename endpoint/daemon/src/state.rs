@@ -31,7 +31,12 @@ impl DaemonState {
         let lease_client = if cfg.server_url.is_empty() {
             None
         } else {
-            Some(LeaseClient::new(&cfg.server_url, &cfg.device_id))
+            Some(LeaseClient::new(
+                &cfg.server_url,
+                &cfg.device_id,
+                &cfg.user_id,
+                &cfg.org_id,
+            ))
         };
         Arc::new(Self {
             cfg,

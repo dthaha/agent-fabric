@@ -13,6 +13,13 @@ use tracing::info;
 pub struct DaemonConfig {
     /// Stable device identifier (MDM enrollment id).
     pub device_id: String,
+    /// User the daemon acts for (IdP subject). Sent to the control plane as
+    /// the `x-fabric-user-sub` identity header; the server resolves identity
+    /// from these headers and trusts nothing else from the client.
+    pub user_id: String,
+    /// Org this device is enrolled in (MDM policy pack). Sent as
+    /// `x-fabric-org-id`; empty means the server-side fallback applies.
+    pub org_id: String,
     /// Path to the local context store (SQLite, WAL mode).
     pub context_db: PathBuf,
     /// Path to the endpoint policy document (JSON). Missing file means the
@@ -32,6 +39,8 @@ impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
             device_id: format!("device-{}", uuid::Uuid::now_v7()),
+            user_id: "local-user".into(),
+            org_id: String::new(),
             context_db: PathBuf::from("fabric-context.db"),
             policy_path: PathBuf::from("fabric-policy.json"),
             server_url: String::new(),

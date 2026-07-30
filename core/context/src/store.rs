@@ -95,6 +95,28 @@ pub trait LeaseAuthority: Send + Sync {
 
     /// Pin an existing lease's granted_seq (handoff freeze point).
     async fn set_granted_seq(&self, lease_id: &str, granted_seq: u64) -> Result<()>;
+
+    /// Transfer the write lease from `from_holder` to `to_holder`, pinned to
+    /// `freeze_seq`. Backends that can should make this atomic (the SQLite
+    /// backend runs it in a single transaction); the default is a sequential
+    /// release + acquire, which a failure can leave writerless.
+    async fn transfer_lease(
+        &self,
+        session_id: &str,
+        from_holder: &str,
+        to_holder: &str,
+        locus: Locus,
+        ttl_ms: i64,
+        freeze_seq: u64,
+    ) -> Result<Lease> {
+        self.release_lease(session_id, from_holder).await?;
+        let mut lease = self
+            .acquire_lease(session_id, to_holder, locus, ttl_ms)
+            .await?;
+        self.set_granted_seq(&lease.lease_id, freeze_seq).await?;
+        lease.granted_seq = freeze_seq;
+        Ok(lease)
+    }
 }
 
 /// Run a blocking store call on the blocking thread pool and flatten the
@@ -221,5 +243,31 @@ impl LeaseAuthority for SqliteContextStore {
         let store = self.clone();
         let lease_id = lease_id.to_string();
         run(move || store.set_granted_seq(&lease_id, granted_seq)).await
+    }
+
+    async fn transfer_lease(
+        &self,
+        session_id: &str,
+        from_holder: &str,
+        to_holder: &str,
+        locus: Locus,
+        ttl_ms: i64,
+        freeze_seq: u64,
+    ) -> Result<Lease> {
+        let store = self.clone();
+        let session_id = session_id.to_string();
+        let from_holder = from_holder.to_string();
+        let to_holder = to_holder.to_string();
+        run(move || {
+            store.transfer_lease(
+                &session_id,
+                &from_holder,
+                &to_holder,
+                locus,
+                ttl_ms,
+                freeze_seq,
+            )
+        })
+        .await
     }
 }

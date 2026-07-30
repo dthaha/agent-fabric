@@ -52,3 +52,8 @@ CREATE TABLE IF NOT EXISTS leases (
 
 CREATE INDEX IF NOT EXISTS idx_leases_session_state
     ON leases(session_id, state);
+
+-- Single-writer, enforced by the database itself: at most one ACTIVE lease
+-- per session. Defense-in-depth behind the transactional acquire path.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_lease
+    ON leases(session_id) WHERE state = 1;

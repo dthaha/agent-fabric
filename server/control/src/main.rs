@@ -2,7 +2,10 @@
 //! admin API from the library's axum router.
 //!
 //! Config via env vars:
-//! - `FABRIC_CONTROL_ADDR` — bind address (default `0.0.0.0:47800`)
+//! - `FABRIC_CONTROL_ADDR` — bind address (default `127.0.0.1:47800`;
+//!   loopback-only by default so an unauthenticated control plane is never
+//!   exposed to the network by accident — put a proxy with auth in front
+//!   before binding wider)
 //! - `FABRIC_CONTROL_DB` — SQLite context store path (default `fabric-control.db`)
 //! - `FABRIC_IDENTITY_DB` — SQLite SOUL/device registry path
 //!   (default `fabric-identity.db`)
@@ -26,7 +29,7 @@ async fn main() -> Result<()> {
     .context("initializing telemetry")?;
 
     let addr: std::net::SocketAddr = std::env::var("FABRIC_CONTROL_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:47800".into())
+        .unwrap_or_else(|_| "127.0.0.1:47800".into())
         .parse()
         .context("parsing FABRIC_CONTROL_ADDR")?;
     let db_path = std::env::var("FABRIC_CONTROL_DB").unwrap_or_else(|_| "fabric-control.db".into());

@@ -33,12 +33,14 @@ pub use constrained_mediator::{
     proposal_json_schema, ConstrainedMediator, ConstrainedMediatorConfig,
     SYSTEM_PROMPT as MEDIATOR_SYSTEM_PROMPT,
 };
-pub use db::{RollbackReport, SqliteContextStore, StoreError};
+pub use db::{Preemption, RollbackReport, SqliteContextStore, StoreError};
 pub use decoder::{
     build_decoder_input, parse_verdict, ConflictDecoder, ContextTurn, DecoderError, DecoderInput,
     StubDecoder, ToolCallView, OUTPUT_SCHEMA,
 };
-pub use handoff::{ack_handoff, catch_up, execute_handoff};
+pub use handoff::{
+    abort_handoff, ack_handoff, catch_up, execute_handoff, CatchUpError, DEFAULT_HANDOFF_TIMEOUT,
+};
 pub use mediator::{
     parse_proposal, ConflictMediator, MediatorError, MediatorInput, SharedEntityView, StubMediator,
     VerdictView, PROPOSAL_OUTPUT_SCHEMA,

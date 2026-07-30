@@ -31,16 +31,21 @@ const RENEW_MARGIN: Duration = Duration::from_secs(60);
 /// How often the maintenance task scans the cache.
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// HTTP client of the control-plane lease API. Cheap to clone.
+/// HTTP client of the control-plane lease API. Cheap to clone. Every
+/// request carries the `x-fabric-*` identity headers: the control plane
+/// resolves the caller's identity (and thus the lease holder) from them and
+/// rejects requests without them.
 #[derive(Clone)]
 pub struct LeaseClient {
     http: reqwest::Client,
     base_url: String,
     holder_id: String,
+    user_id: String,
+    org_id: String,
 }
 
 impl LeaseClient {
-    pub fn new(base_url: &str, holder_id: &str) -> Self {
+    pub fn new(base_url: &str, holder_id: &str, user_id: &str, org_id: &str) -> Self {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
@@ -50,19 +55,33 @@ impl LeaseClient {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
             holder_id: holder_id.to_string(),
+            user_id: user_id.to_string(),
+            org_id: org_id.to_string(),
+        }
+    }
+
+    /// Attach the identity headers the control plane requires (ADR 007).
+    fn with_identity(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let req = req
+            .header("x-fabric-user-sub", &self.user_id)
+            .header("x-fabric-device-sub", &self.holder_id);
+        if self.org_id.is_empty() {
+            req
+        } else {
+            req.header("x-fabric-org-id", &self.org_id)
         }
     }
 
     /// Request a fresh lease from the server. The returned lease is stamped
     /// with the SERVER clock and carries the server's identity in
-    /// `granted_by`.
+    /// `granted_by`. The holder is derived server-side from the identity
+    /// headers, not from the body.
     pub async fn acquire(&self, session_id: &str, ttl_ms: i64) -> Result<Lease> {
         let lease = self
-            .http
-            .post(format!("{}/lease/acquire", self.base_url))
+            .with_identity(self.http.post(format!("{}/lease/acquire", self.base_url)))
             .json(&AcquireLeaseRequest {
                 session_id: session_id.to_string(),
-                holder_id: self.holder_id.clone(),
+                holder_id: String::new(),
                 locus: Some(Locus::Endpoint as i32),
                 ttl_ms: Some(ttl_ms),
             })
@@ -78,14 +97,13 @@ impl LeaseClient {
     }
 
     /// Extend a held lease. The server re-stamps `expires_at` with its own
-    /// clock; the holder id must match.
+    /// clock; the holder is matched against the identity headers.
     pub async fn renew(&self, lease_id: &str, ttl_ms: i64) -> Result<Lease> {
         let lease = self
-            .http
-            .post(format!("{}/lease/renew", self.base_url))
+            .with_identity(self.http.post(format!("{}/lease/renew", self.base_url)))
             .json(&RenewLeaseRequest {
                 lease_id: lease_id.to_string(),
-                holder_id: self.holder_id.clone(),
+                holder_id: String::new(),
                 ttl_ms: Some(ttl_ms),
             })
             .send()
@@ -104,11 +122,10 @@ impl LeaseClient {
     /// as part of the client API.
     #[allow(dead_code)]
     pub async fn release(&self, session_id: &str) -> Result<()> {
-        self.http
-            .delete(format!("{}/lease/release", self.base_url))
+        self.with_identity(self.http.delete(format!("{}/lease/release", self.base_url)))
             .json(&ReleaseLeaseRequest {
                 session_id: session_id.to_string(),
-                holder_id: self.holder_id.clone(),
+                holder_id: String::new(),
             })
             .send()
             .await
@@ -126,8 +143,7 @@ impl LeaseClient {
         entries: &[ContextEntry],
     ) -> Result<fabric_context::ReconcileReport> {
         let report = self
-            .http
-            .post(format!("{}/context/replay", self.base_url))
+            .with_identity(self.http.post(format!("{}/context/replay", self.base_url)))
             .json(&ReplayRequest {
                 session_id: session_id.to_string(),
                 entries: entries.to_vec(),
@@ -548,7 +564,7 @@ mod tests {
         // Server comes back: point the client at it and re-ensure.
         let (url, control) = spawn_control().await;
         Arc::get_mut(&mut state).unwrap().lease_client =
-            Some(LeaseClient::new(&url, "endpoint-test"));
+            Some(LeaseClient::new(&url, "endpoint-test", "local-user", ""));
         ensure_lease(&state, "s1").await;
 
         // Lease acquired and no longer wanted.

@@ -85,11 +85,35 @@ pub(crate) fn is_expired(expires_at: i64, now: i64) -> bool {
     expires_at > 0 && now >= expires_at
 }
 
+/// Parameters for [`SqliteContextStore::preempt_lease`]. Grouped because
+/// preemption touches both leases and the op-log at once; the fields mirror
+/// the audit trail (who took over, from which surface, and why).
+#[derive(Debug, Clone)]
+pub struct Preemption {
+    pub session_id: String,
+    /// The lease being taken over. Must be the session's ACTIVE lease.
+    pub old_lease_id: String,
+    /// Device the fresh lease is granted to.
+    pub new_holder_id: String,
+    /// Surface recorded in `preempted_by` on the revoked lease (audit).
+    pub new_surface_id: String,
+    pub locus: Locus,
+    pub ttl_ms: i64,
+    /// Recorded in the revocation SYSTEM_EVENT.
+    pub reason: String,
+}
+
 /// The SQLite-backed context store. Wraps a single SQLite connection behind
 /// a mutex so the store is `Send + Sync` and cheap to clone into blocking
 /// tasks (the async [`crate::store::ContextStore`] impl runs calls via
-/// `spawn_blocking`). Mutating operations that must be atomic take `&mut
-/// self`-adjacent locks on the one connection and run inside a transaction.
+/// `spawn_blocking`). Mutating operations that must be atomic
+/// ([`SqliteContextStore::acquire_lease`], [`SqliteContextStore::append_entry`],
+/// [`SqliteContextStore::preempt_lease`], [`SqliteContextStore::transfer_lease`])
+/// hold the connection lock for their whole duration and run inside a single
+/// SQLite transaction, so a crash or contention mid-operation can never leave
+/// a session half-written (dual writers, writerless sessions, or seq gaps).
+/// The `idx_one_active_lease` partial unique index is defense-in-depth: the
+/// database itself rejects a second ACTIVE lease for a session.
 #[derive(Clone)]
 pub struct SqliteContextStore {
     conn: Arc<Mutex<Connection>>,
@@ -208,28 +232,7 @@ impl SqliteContextStore {
     }
 
     pub fn session(&self, session_id: &str) -> Result<SessionMeta> {
-        self.conn()
-            .query_row(
-                "SELECT session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels, org_id
-                 FROM sessions WHERE session_id = ?1",
-                params![session_id],
-                |row| {
-                    let labels_json: String = row.get(7)?;
-                    Ok(SessionMeta {
-                        session_id: row.get(0)?,
-                        soul_id: row.get(1)?,
-                        user_id: row.get(2)?,
-                        state: row.get(3)?,
-                        active_lease: row.get(4)?,
-                        created_at: Some(ms_to_timestamp(row.get(5)?)),
-                        last_activity: Some(ms_to_timestamp(row.get(6)?)),
-                        labels: serde_json::from_str(&labels_json).unwrap_or_default(),
-                        org_id: row.get(8)?,
-                    })
-                },
-            )
-            .optional()?
-            .ok_or_else(|| StoreError::SessionNotFound(session_id.to_string()))
+        session_conn(&self.conn(), session_id)
     }
 
     /// Raw state setter. Crate-internal: callers outside this module must
@@ -302,6 +305,11 @@ impl SqliteContextStore {
     /// Fails with [`StoreError::LeaseConflict`] if another holder already
     /// holds an unexpired ACTIVE lease. An expired ACTIVE lease (crashed
     /// holder) is marked EXPIRED and superseded.
+    ///
+    /// The conflict check, lease insert, and session update run in ONE
+    /// transaction: two racing acquirers cannot both win (TOCTOU), and the
+    /// `idx_one_active_lease` partial unique index is the database-level
+    /// backstop if they somehow both try to insert.
     pub fn acquire_lease(
         &self,
         session_id: &str,
@@ -309,33 +317,10 @@ impl SqliteContextStore {
         locus: Locus,
         ttl_ms: i64,
     ) -> Result<Lease> {
-        if let Some(existing) = self.active_lease(session_id)? {
-            let expires_ms = timestamp_to_ms(existing.expires_at.as_ref());
-            if !is_expired(expires_ms, now_ms()) {
-                return Err(StoreError::LeaseConflict(session_id.to_string()));
-            }
-            // Crashed holder: the safety-net TTL fired. Retire the stale
-            // lease so a new writer can take over.
-            self.set_lease_state(&existing.lease_id, LeaseState::Expired)?;
-        }
-        let now = now_ms();
-        let lease = Lease {
-            lease_id: format!("lease-{}", uuid::Uuid::now_v7()),
-            session_id: session_id.to_string(),
-            holder_id: holder_id.to_string(),
-            locus: locus as i32,
-            granted_seq: self.head_seq(session_id)?,
-            granted_at: Some(ms_to_timestamp(now)),
-            expires_at: Some(ms_to_timestamp(now + ttl_ms)),
-            state: LeaseState::Active as i32,
-            granted_by: String::new(),
-            preempted_by: String::new(),
-        };
-        self.insert_lease(&lease)?;
-        self.conn().execute(
-            "UPDATE sessions SET active_lease = ?1, last_activity_ms = ?2 WHERE session_id = ?3",
-            params![lease.lease_id, now, session_id],
-        )?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let lease = acquire_lease_conn(&tx, session_id, holder_id, locus, ttl_ms)?;
+        tx.commit()?;
         Ok(lease)
     }
 
@@ -450,6 +435,95 @@ impl SqliteContextStore {
         Ok(lease)
     }
 
+    /// Presence-driven preemption, atomically: mark the old ACTIVE lease
+    /// REVOKED with `preempted_by` recorded for audit, log the revocation
+    /// SYSTEM_EVENT, and grant a fresh lease to the new holder — all in ONE
+    /// transaction. A crash between revoke and grant can never leave the
+    /// session writerless.
+    ///
+    /// Fails with [`StoreError::LeaseNotActive`] if `old_lease_id` is not the
+    /// session's ACTIVE lease (already revoked/released/expired): preemption
+    /// of a dead lease is a no-op error, never a silent takeover.
+    pub fn preempt_lease(&self, preemption: &Preemption) -> Result<Lease> {
+        let Preemption {
+            session_id,
+            old_lease_id,
+            new_holder_id,
+            new_surface_id,
+            locus,
+            ttl_ms,
+            reason,
+        } = preemption;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+
+        let old = lease_conn(&tx, old_lease_id)?;
+        if &old.session_id != session_id || old.state != LeaseState::Active as i32 {
+            return Err(StoreError::LeaseNotActive(old_lease_id.clone()));
+        }
+        tx.execute(
+            "UPDATE leases SET state = ?1, preempted_by = ?2 WHERE lease_id = ?3",
+            params![LeaseState::Revoked as i32, new_surface_id, old_lease_id],
+        )?;
+
+        // Record the revocation in the op-log itself, bypassing the lease
+        // gate: the revoked holder must not be able to suppress the event.
+        let event = ContextEntry {
+            entry_id: format!("revoke-{}", uuid::Uuid::now_v7()),
+            session_id: session_id.clone(),
+            seq: head_seq_conn(&tx, session_id)? + 1,
+            kind: EntryKind::SystemEvent as i32,
+            payload: reason.as_bytes().to_vec(),
+            lease_holder: "system".to_string(),
+            policy_version: String::new(),
+            locus: Locus::Unspecified as i32,
+            created_at: Some(ms_to_timestamp(self.clock.tick())),
+            received_at: None,
+            disposition: String::new(),
+        };
+        insert_entry_conn(&tx, &event)?;
+
+        let lease = grant_lease_conn(&tx, session_id, new_holder_id, *locus, *ttl_ms)?;
+        tx.commit()?;
+        Ok(lease)
+    }
+
+    /// Atomic lease transfer for handoff: release the current holder's lease
+    /// and grant a fresh one to the new holder pinned to `freeze_seq`, in ONE
+    /// transaction. Failure between release and acquire is impossible, so a
+    /// handoff that errors never leaves the session writerless.
+    pub fn transfer_lease(
+        &self,
+        session_id: &str,
+        from_holder: &str,
+        to_holder: &str,
+        locus: Locus,
+        ttl_ms: i64,
+        freeze_seq: u64,
+    ) -> Result<Lease> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+
+        let old = active_lease_conn(&tx, session_id)?
+            .ok_or_else(|| StoreError::NoActiveLease(session_id.to_string()))?;
+        if old.holder_id != from_holder {
+            return Err(StoreError::NotLeaseHolder {
+                writer: from_holder.to_string(),
+                holder: old.holder_id,
+            });
+        }
+        set_lease_state_conn(&tx, &old.lease_id, LeaseState::Released)?;
+
+        let mut lease = grant_lease_conn(&tx, session_id, to_holder, locus, ttl_ms)?;
+        tx.execute(
+            "UPDATE leases SET granted_seq = ?1 WHERE lease_id = ?2",
+            params![freeze_seq as i64, lease.lease_id],
+        )?;
+        lease.granted_seq = freeze_seq;
+        tx.commit()?;
+        Ok(lease)
+    }
+
     /// Revoke every active lease on sessions owned by `org_id`. Org-scoped
     /// kill-switch for enterprise admin. Returns the revoked leases.
     pub fn revoke_all(&self, org_id: &str) -> Result<Vec<Lease>> {
@@ -485,80 +559,22 @@ impl SqliteContextStore {
     }
 
     pub(crate) fn insert_lease(&self, lease: &Lease) -> Result<()> {
-        self.conn().execute(
-            "INSERT INTO leases
-             (lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state, granted_by, preempted_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                lease.lease_id,
-                lease.session_id,
-                lease.holder_id,
-                lease.locus,
-                lease.granted_seq as i64,
-                timestamp_to_ms(lease.granted_at.as_ref()),
-                timestamp_to_ms(lease.expires_at.as_ref()),
-                lease.state,
-                lease.granted_by,
-                lease.preempted_by,
-            ],
-        )?;
-        Ok(())
+        insert_lease_conn(&self.conn(), lease)
     }
 
     pub fn lease(&self, lease_id: &str) -> Result<Lease> {
-        self.conn()
-            .query_row(
-                "SELECT lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state, granted_by, preempted_by
-                 FROM leases WHERE lease_id = ?1",
-                params![lease_id],
-                |row| {
-                    Ok(Lease {
-                        lease_id: row.get(0)?,
-                        session_id: row.get(1)?,
-                        holder_id: row.get(2)?,
-                        locus: row.get(3)?,
-                        granted_seq: row.get::<_, i64>(4)? as u64,
-                        granted_at: Some(ms_to_timestamp(row.get(5)?)),
-                        expires_at: Some(ms_to_timestamp(row.get(6)?)),
-                        state: row.get(7)?,
-                        granted_by: row.get(8)?,
-                        preempted_by: row.get(9)?,
-                    })
-                },
-            )
-            .optional()?
-            .ok_or_else(|| StoreError::LeaseNotFound(lease_id.to_string()))
+        lease_conn(&self.conn(), lease_id)
     }
 
     /// The session's ACTIVE lease, or the most recently expired one that has
     /// not yet been superseded (an expired lease blocks new writers until a
     /// handoff or re-grant occurs).
     pub fn active_lease(&self, session_id: &str) -> Result<Option<Lease>> {
-        let id: Option<String> = {
-            let conn = self.conn();
-            conn.query_row(
-                "SELECT lease_id FROM leases WHERE session_id = ?1 AND state = ?2
-                 ORDER BY granted_at_ms DESC LIMIT 1",
-                params![session_id, LeaseState::Active as i32],
-                |row| row.get(0),
-            )
-            .optional()?
-        };
-        match id {
-            Some(id) => Ok(Some(self.lease(&id)?)),
-            None => Ok(None),
-        }
+        active_lease_conn(&self.conn(), session_id)
     }
 
     pub(crate) fn set_lease_state(&self, lease_id: &str, state: LeaseState) -> Result<()> {
-        let n = self.conn().execute(
-            "UPDATE leases SET state = ?1 WHERE lease_id = ?2",
-            params![state as i32, lease_id],
-        )?;
-        if n == 0 {
-            return Err(StoreError::LeaseNotFound(lease_id.to_string()));
-        }
-        Ok(())
+        set_lease_state_conn(&self.conn(), lease_id, state)
     }
 
     /// Record the lease authority that granted this lease. The server
@@ -629,20 +645,7 @@ impl SqliteContextStore {
 
     /// Verify that `writer` currently holds the write lease for `session_id`.
     pub fn verify_writer(&self, session_id: &str, writer: &str) -> Result<Lease> {
-        let lease = self
-            .active_lease(session_id)?
-            .ok_or_else(|| StoreError::NoActiveLease(session_id.to_string()))?;
-        if lease.holder_id != writer {
-            return Err(StoreError::NotLeaseHolder {
-                writer: writer.to_string(),
-                holder: lease.holder_id,
-            });
-        }
-        let expires_ms = timestamp_to_ms(lease.expires_at.as_ref());
-        if is_expired(expires_ms, now_ms()) {
-            return Err(StoreError::LeaseExpired(lease.lease_id));
-        }
-        Ok(lease)
+        verify_writer_conn(&self.conn(), session_id, writer)
     }
 
     // ---- op-log ----
@@ -650,17 +653,24 @@ impl SqliteContextStore {
     /// Append an entry to the op-log. Assigns the next sequence number,
     /// enforces that the session is ACTIVE, and enforces the write lease.
     /// Returns the assigned seq.
+    ///
+    /// Writer verification, seq assignment, and the insert run in ONE
+    /// transaction: a lease change between check and write (TOCTOU) or a
+    /// crash mid-append can never produce a half-committed entry or a seq
+    /// collision between racing writers.
     #[instrument(skip(self, entry), fields(session = %entry.session_id))]
     pub fn append_entry(&self, entry: &mut ContextEntry) -> Result<u64> {
-        let session = self.session(&entry.session_id)?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let session = session_conn(&tx, &entry.session_id)?;
         if session.state != SessionState::Active as i32 {
             return Err(StoreError::SessionNotActive {
                 session_id: entry.session_id.clone(),
                 state: session_state_name(session.state),
             });
         }
-        self.verify_writer(&entry.session_id, &entry.lease_holder)?;
-        let seq = self.head_seq(&entry.session_id)? + 1;
+        verify_writer_conn(&tx, &entry.session_id, &entry.lease_holder)?;
+        let seq = head_seq_conn(&tx, &entry.session_id)? + 1;
         entry.seq = seq;
         // The writer always stamps created_at with its own monotonic clock;
         // a caller-supplied timestamp is never trusted (it could forge
@@ -671,11 +681,12 @@ impl SqliteContextStore {
         // received_at is stamped on reconcile ingest by the receiving store,
         // never by the writer (ADR 006); a direct local append has none.
         entry.received_at = None;
-        self.insert_entry_raw(entry)?;
-        self.conn().execute(
+        insert_entry_conn(&tx, entry)?;
+        tx.execute(
             "UPDATE sessions SET last_activity_ms = ?1 WHERE session_id = ?2",
             params![now_ms(), entry.session_id],
         )?;
+        tx.commit()?;
         Ok(seq)
     }
 
@@ -684,25 +695,7 @@ impl SqliteContextStore {
     /// writer's locus. Crate-internal: external writers must use
     /// [`SqliteContextStore::append_entry`] so the lease is always enforced.
     pub(crate) fn insert_entry_raw(&self, entry: &ContextEntry) -> Result<()> {
-        self.conn().execute(
-            "INSERT INTO context_entries
-             (session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms, received_at_ms, disposition)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![
-                entry.session_id,
-                entry.seq as i64,
-                entry.entry_id,
-                entry.kind,
-                entry.payload,
-                entry.lease_holder,
-                entry.policy_version,
-                entry.locus,
-                timestamp_to_ms(entry.created_at.as_ref()),
-                entry.received_at.as_ref().map(|ts| timestamp_to_ms(Some(ts))),
-                entry.disposition,
-            ],
-        )?;
-        Ok(())
+        insert_entry_conn(&self.conn(), entry)
     }
 
     pub fn entry_by_id(&self, entry_id: &str) -> Result<Option<ContextEntry>> {
@@ -746,16 +739,7 @@ impl SqliteContextStore {
     }
 
     pub fn head_seq(&self, session_id: &str) -> Result<u64> {
-        let seq: Option<i64> = self
-            .conn()
-            .query_row(
-                "SELECT MAX(seq) FROM context_entries WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten();
-        Ok(seq.unwrap_or(0) as u64)
+        head_seq_conn(&self.conn(), session_id)
     }
 
     /// Set an entry's disposition (ADR 006). Reconcile marks policy-violating
@@ -783,6 +767,207 @@ impl SqliteContextStore {
         }
         Ok(())
     }
+}
+
+/// Connection-level helpers. Every store method above delegates to these so
+/// the transactional paths (`acquire_lease`, `append_entry`, `preempt_lease`,
+/// `transfer_lease`) can compose them inside one `Transaction` (which derefs
+/// to `&Connection`) without re-taking the store's connection mutex — which
+/// would deadlock, as `std::sync::Mutex` is not reentrant.
+fn session_conn(conn: &Connection, session_id: &str) -> Result<SessionMeta> {
+    conn.query_row(
+        "SELECT session_id, soul_id, user_id, state, active_lease, created_at_ms, last_activity_ms, labels, org_id
+         FROM sessions WHERE session_id = ?1",
+        params![session_id],
+        |row| {
+            let labels_json: String = row.get(7)?;
+            Ok(SessionMeta {
+                session_id: row.get(0)?,
+                soul_id: row.get(1)?,
+                user_id: row.get(2)?,
+                state: row.get(3)?,
+                active_lease: row.get(4)?,
+                created_at: Some(ms_to_timestamp(row.get(5)?)),
+                last_activity: Some(ms_to_timestamp(row.get(6)?)),
+                labels: serde_json::from_str(&labels_json).unwrap_or_default(),
+                org_id: row.get(8)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or_else(|| StoreError::SessionNotFound(session_id.to_string()))
+}
+
+fn lease_conn(conn: &Connection, lease_id: &str) -> Result<Lease> {
+    conn.query_row(
+        "SELECT lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state, granted_by, preempted_by
+         FROM leases WHERE lease_id = ?1",
+        params![lease_id],
+        |row| {
+            Ok(Lease {
+                lease_id: row.get(0)?,
+                session_id: row.get(1)?,
+                holder_id: row.get(2)?,
+                locus: row.get(3)?,
+                granted_seq: row.get::<_, i64>(4)? as u64,
+                granted_at: Some(ms_to_timestamp(row.get(5)?)),
+                expires_at: Some(ms_to_timestamp(row.get(6)?)),
+                state: row.get(7)?,
+                granted_by: row.get(8)?,
+                preempted_by: row.get(9)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or_else(|| StoreError::LeaseNotFound(lease_id.to_string()))
+}
+
+fn active_lease_conn(conn: &Connection, session_id: &str) -> Result<Option<Lease>> {
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT lease_id FROM leases WHERE session_id = ?1 AND state = ?2
+             ORDER BY granted_at_ms DESC LIMIT 1",
+            params![session_id, LeaseState::Active as i32],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match id {
+        Some(id) => Ok(Some(lease_conn(conn, &id)?)),
+        None => Ok(None),
+    }
+}
+
+fn head_seq_conn(conn: &Connection, session_id: &str) -> Result<u64> {
+    let seq: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(seq) FROM context_entries WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(seq.unwrap_or(0) as u64)
+}
+
+fn insert_lease_conn(conn: &Connection, lease: &Lease) -> Result<()> {
+    conn.execute(
+        "INSERT INTO leases
+         (lease_id, session_id, holder_id, locus, granted_seq, granted_at_ms, expires_at_ms, state, granted_by, preempted_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            lease.lease_id,
+            lease.session_id,
+            lease.holder_id,
+            lease.locus,
+            lease.granted_seq as i64,
+            timestamp_to_ms(lease.granted_at.as_ref()),
+            timestamp_to_ms(lease.expires_at.as_ref()),
+            lease.state,
+            lease.granted_by,
+            lease.preempted_by,
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_entry_conn(conn: &Connection, entry: &ContextEntry) -> Result<()> {
+    conn.execute(
+        "INSERT INTO context_entries
+         (session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms, received_at_ms, disposition)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            entry.session_id,
+            entry.seq as i64,
+            entry.entry_id,
+            entry.kind,
+            entry.payload,
+            entry.lease_holder,
+            entry.policy_version,
+            entry.locus,
+            timestamp_to_ms(entry.created_at.as_ref()),
+            entry.received_at.as_ref().map(|ts| timestamp_to_ms(Some(ts))),
+            entry.disposition,
+        ],
+    )?;
+    Ok(())
+}
+
+fn set_lease_state_conn(conn: &Connection, lease_id: &str, state: LeaseState) -> Result<()> {
+    let n = conn.execute(
+        "UPDATE leases SET state = ?1 WHERE lease_id = ?2",
+        params![state as i32, lease_id],
+    )?;
+    if n == 0 {
+        return Err(StoreError::LeaseNotFound(lease_id.to_string()));
+    }
+    Ok(())
+}
+
+fn verify_writer_conn(conn: &Connection, session_id: &str, writer: &str) -> Result<Lease> {
+    let lease = active_lease_conn(conn, session_id)?
+        .ok_or_else(|| StoreError::NoActiveLease(session_id.to_string()))?;
+    if lease.holder_id != writer {
+        return Err(StoreError::NotLeaseHolder {
+            writer: writer.to_string(),
+            holder: lease.holder_id,
+        });
+    }
+    let expires_ms = timestamp_to_ms(lease.expires_at.as_ref());
+    if is_expired(expires_ms, now_ms()) {
+        return Err(StoreError::LeaseExpired(lease.lease_id));
+    }
+    Ok(lease)
+}
+
+/// Insert a fresh ACTIVE lease for `session_id` and point the session at it.
+/// Caller must hold the transaction and have already established that no
+/// unexpired ACTIVE lease exists.
+fn grant_lease_conn(
+    conn: &Connection,
+    session_id: &str,
+    holder_id: &str,
+    locus: Locus,
+    ttl_ms: i64,
+) -> Result<Lease> {
+    let now = now_ms();
+    let lease = Lease {
+        lease_id: format!("lease-{}", uuid::Uuid::now_v7()),
+        session_id: session_id.to_string(),
+        holder_id: holder_id.to_string(),
+        locus: locus as i32,
+        granted_seq: head_seq_conn(conn, session_id)?,
+        granted_at: Some(ms_to_timestamp(now)),
+        expires_at: Some(ms_to_timestamp(now + ttl_ms)),
+        state: LeaseState::Active as i32,
+        granted_by: String::new(),
+        preempted_by: String::new(),
+    };
+    insert_lease_conn(conn, &lease)?;
+    conn.execute(
+        "UPDATE sessions SET active_lease = ?1, last_activity_ms = ?2 WHERE session_id = ?3",
+        params![lease.lease_id, now, session_id],
+    )?;
+    Ok(lease)
+}
+
+/// The transactional body of [`SqliteContextStore::acquire_lease`].
+fn acquire_lease_conn(
+    conn: &Connection,
+    session_id: &str,
+    holder_id: &str,
+    locus: Locus,
+    ttl_ms: i64,
+) -> Result<Lease> {
+    if let Some(existing) = active_lease_conn(conn, session_id)? {
+        let expires_ms = timestamp_to_ms(existing.expires_at.as_ref());
+        if !is_expired(expires_ms, now_ms()) {
+            return Err(StoreError::LeaseConflict(session_id.to_string()));
+        }
+        // Crashed holder: the safety-net TTL fired. Retire the stale
+        // lease so a new writer can take over.
+        set_lease_state_conn(conn, &existing.lease_id, LeaseState::Expired)?;
+    }
+    grant_lease_conn(conn, session_id, holder_id, locus, ttl_ms)
 }
 
 pub(crate) fn session_state_name(state: i32) -> String {
@@ -1679,5 +1864,143 @@ pub(crate) mod tests {
             store.set_granted_by("nope", "x"),
             Err(StoreError::LeaseNotFound(_))
         ));
+    }
+
+    #[test]
+    fn one_active_lease_index_backstops_single_writer() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+
+        // Bypass the transactional acquire path entirely: a raw insert of a
+        // second ACTIVE lease is rejected by the database itself — the
+        // partial unique index is the defense-in-depth behind acquire's
+        // check-then-insert.
+        let lease2 = test_lease("l2", "s1", "server-1");
+        let err = store.insert_lease(&lease2).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                StoreError::Sqlite(rusqlite::Error::SqliteFailure(ref e, _))
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation
+            ),
+            "expected a unique-constraint violation, got {err}"
+        );
+        // The original lease is untouched.
+        assert_eq!(
+            store.active_lease("s1").unwrap().unwrap().holder_id,
+            "endpoint-1"
+        );
+    }
+
+    #[test]
+    fn preempt_lease_revokes_and_grants_atomically() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        let old = store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+        let mut e1 = test_entry("e1", "s1", "endpoint-1");
+        store.append_entry(&mut e1).unwrap();
+
+        let new = store
+            .preempt_lease(&Preemption {
+                session_id: "s1".into(),
+                old_lease_id: old.lease_id.clone(),
+                new_holder_id: "web-1".into(),
+                new_surface_id: "web-1".into(),
+                locus: Locus::Server,
+                ttl_ms: 30_000,
+                reason: "user active on web".into(),
+            })
+            .unwrap();
+        assert_eq!(new.holder_id, "web-1");
+        assert_eq!(new.state, LeaseState::Active as i32);
+
+        // The old lease is REVOKED with preemption recorded for audit, in
+        // the same transaction as the grant.
+        let old = store.lease(&old.lease_id).unwrap();
+        assert_eq!(old.state, LeaseState::Revoked as i32);
+        assert_eq!(old.preempted_by, "web-1");
+
+        // The revocation is recorded in the op-log as a SYSTEM_EVENT.
+        let log = store.entries_since("s1", 0).unwrap();
+        let event = log.last().unwrap();
+        assert_eq!(event.kind, EntryKind::SystemEvent as i32);
+        assert_eq!(event.payload, b"user active on web");
+
+        // The new holder writes immediately — the session was never
+        // writerless at any visible point.
+        let mut e2 = test_entry("e2", "s1", "web-1");
+        assert_eq!(store.append_entry(&mut e2).unwrap(), 3);
+    }
+
+    #[test]
+    fn preempt_lease_rejects_already_revoked_lease() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        let old = store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+        store.revoke_lease("s1", "policy violation").unwrap();
+
+        // Preempting a dead lease fails cleanly: no takeover, no new lease.
+        let err = store
+            .preempt_lease(&Preemption {
+                session_id: "s1".into(),
+                old_lease_id: old.lease_id.clone(),
+                new_holder_id: "web-1".into(),
+                new_surface_id: "web-1".into(),
+                locus: Locus::Server,
+                ttl_ms: 30_000,
+                reason: "too late".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, StoreError::LeaseNotActive(_)), "{err}");
+        assert!(store.active_lease("s1").unwrap().is_none());
+        assert_eq!(
+            store.lease(&old.lease_id).unwrap().state,
+            LeaseState::Revoked as i32
+        );
+    }
+
+    #[test]
+    fn transfer_lease_releases_and_grants_atomically() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        let old = store
+            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 30_000)
+            .unwrap();
+        for i in 1..=2 {
+            let mut e = test_entry(&format!("e{i}"), "s1", "endpoint-1");
+            store.append_entry(&mut e).unwrap();
+        }
+
+        let new = store
+            .transfer_lease("s1", "endpoint-1", "server-1", Locus::Server, 30_000, 2)
+            .unwrap();
+        assert_eq!(new.holder_id, "server-1");
+        assert_eq!(new.granted_seq, 2, "pinned to the handoff freeze point");
+        assert_eq!(
+            store.lease(&old.lease_id).unwrap().state,
+            LeaseState::Released as i32
+        );
+        assert_eq!(
+            store.active_lease("s1").unwrap().unwrap().lease_id,
+            new.lease_id
+        );
+
+        // A transfer naming the wrong current holder fails and changes
+        // nothing: the active lease and session writer are untouched.
+        let err = store
+            .transfer_lease("s1", "mallory", "attacker-1", Locus::Server, 30_000, 2)
+            .unwrap_err();
+        assert!(matches!(err, StoreError::NotLeaseHolder { .. }));
+        assert_eq!(
+            store.active_lease("s1").unwrap().unwrap().holder_id,
+            "server-1"
+        );
     }
 }
