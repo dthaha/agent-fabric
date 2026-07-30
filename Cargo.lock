@@ -499,11 +499,14 @@ dependencies = [
  "fabric-telemetry",
  "fabric-types",
  "pbjson-types",
+ "rusqlite",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

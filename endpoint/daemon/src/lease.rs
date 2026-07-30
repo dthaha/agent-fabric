@@ -437,7 +437,8 @@ mod tests {
     /// Bind a control plane on an ephemeral localhost port.
     async fn spawn_control() -> (String, Arc<fabric_control::ControlState>) {
         let store = SqliteContextStore::open_in_memory().unwrap();
-        let control = fabric_control::ControlState::new(store, "fabric-server-test");
+        let souls = fabric_control::soul::SoulRegistry::open_in_memory().unwrap();
+        let control = fabric_control::ControlState::new(store, souls, "fabric-server-test");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = fabric_control::router(Arc::clone(&control));

@@ -13,6 +13,9 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+pub mod identity;
+pub mod soul;
+
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -30,6 +33,9 @@ use fabric_types::lease::{
 };
 use serde_json::{json, Value};
 use tracing::info;
+
+use crate::identity::{Identity, IdentityContext};
+use crate::soul::SoulRegistry;
 
 /// Default TTL for leases granted via preempt/presence, where the caller does
 /// not specify one. Matches the turn-scoped safety-net posture of the core
@@ -56,32 +62,39 @@ fn resolve_ttl(ttl_ms: Option<i64>) -> Result<i64, (StatusCode, Json<Value>)> {
 }
 
 /// State shared by every control-plane handler. The store is the lease
-/// authority; `identity` is stamped into `granted_by` on every lease the
-/// server issues.
+/// authority; `souls` is the SOUL + device registry (ADR 007); `identity`
+/// is stamped into `granted_by` on every lease the server issues.
 pub struct ControlState {
     pub store: SqliteContextStore,
+    pub souls: SoulRegistry,
     pub identity: String,
 }
 
 impl ControlState {
-    pub fn new(store: SqliteContextStore, identity: impl Into<String>) -> Arc<Self> {
+    pub fn new(
+        store: SqliteContextStore,
+        souls: SoulRegistry,
+        identity: impl Into<String>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             store,
+            souls,
             identity: identity.into(),
         })
     }
 
     /// Identity from `FABRIC_SERVER_IDENTITY`, defaulting to "fabric-server".
-    pub fn from_env(store: SqliteContextStore) -> Arc<Self> {
+    pub fn from_env(store: SqliteContextStore, souls: SoulRegistry) -> Arc<Self> {
         let identity =
             std::env::var("FABRIC_SERVER_IDENTITY").unwrap_or_else(|_| "fabric-server".into());
-        Self::new(store, identity)
+        Self::new(store, souls, identity)
     }
 }
 
 pub fn router(state: Arc<ControlState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/identity", get(get_identity))
         .route("/lease/acquire", post(acquire))
         .route("/lease/preempt", post(preempt))
         .route("/lease/renew", post(renew))
@@ -175,6 +188,13 @@ async fn stamp_granted_by(
 
 async fn healthz() -> Json<Value> {
     Json(json!({ "status": "ok" }))
+}
+
+/// Returns the server-resolved identity context (ADR 007). Demonstrates the
+/// identity extractor: the client supplies no identity fields in the body;
+/// all four are derived from headers + registry.
+async fn get_identity(Identity(ctx): Identity) -> Json<IdentityContext> {
+    Json(ctx)
 }
 
 /// Grant a write lease, server-stamped. 409 while another holder's
@@ -399,7 +419,8 @@ mod tests {
 
     fn test_state() -> Arc<ControlState> {
         let store = SqliteContextStore::open_in_memory().unwrap();
-        ControlState::new(store, "fabric-server-test")
+        let souls = SoulRegistry::open_in_memory().unwrap();
+        ControlState::new(store, souls, "fabric-server-test")
     }
 
     async fn request(

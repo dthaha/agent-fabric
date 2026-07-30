@@ -4,11 +4,16 @@
 //! Config via env vars:
 //! - `FABRIC_CONTROL_ADDR` — bind address (default `0.0.0.0:47800`)
 //! - `FABRIC_CONTROL_DB` — SQLite context store path (default `fabric-control.db`)
+//! - `FABRIC_IDENTITY_DB` — SQLite SOUL/device registry path
+//!   (default `fabric-identity.db`)
 //! - `FABRIC_SERVER_IDENTITY` — identity stamped into `granted_by`
 //!   (default `fabric-server`)
+//! - `FABRIC_ORG_ID` — org fallback for single-org deployments
+//!   (default `default`)
 
 use anyhow::{Context, Result};
 use fabric_context::SqliteContextStore;
+use fabric_control::soul::SoulRegistry;
 use fabric_control::ControlState;
 use tracing::info;
 
@@ -25,10 +30,14 @@ async fn main() -> Result<()> {
         .parse()
         .context("parsing FABRIC_CONTROL_ADDR")?;
     let db_path = std::env::var("FABRIC_CONTROL_DB").unwrap_or_else(|_| "fabric-control.db".into());
+    let identity_db_path =
+        std::env::var("FABRIC_IDENTITY_DB").unwrap_or_else(|_| "fabric-identity.db".into());
 
     let store = SqliteContextStore::open(&db_path)
         .with_context(|| format!("opening context store {db_path}"))?;
-    let state = ControlState::from_env(store);
+    let souls = SoulRegistry::open(&identity_db_path)
+        .with_context(|| format!("opening identity registry {identity_db_path}"))?;
+    let state = ControlState::from_env(store, souls);
 
     info!(%addr, "fabric-control listening");
     fabric_control::serve(state, addr, wait_for_shutdown_signal()).await?;
