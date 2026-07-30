@@ -59,6 +59,16 @@ fn check_org(existing: &str, new: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Strip secrets from a policy document before it is persisted. The safety
+/// endpoint's bearer token must never hit disk; operators supply it via env
+/// var or a secret store at runtime.
+fn redact_policy_secrets(mut policy: EndpointPolicy) -> EndpointPolicy {
+    if let Some(safety) = policy.safety.as_mut() {
+        safety.api_key.clear();
+    }
+    policy
+}
+
 /// Holds the latest endpoint + server policies and their merged product.
 /// Loading a new policy version re-merges immediately; the next [`Self::gate`]
 /// call reflects it.
@@ -183,11 +193,14 @@ impl PolicyStore {
         self.effective = merge(&endpoint, &server);
     }
 
-    /// Persist both policy documents to `path` as JSON.
+    /// Persist both policy documents to `path` as JSON. Secrets are redacted
+    /// on the way out: `safety.api_key` lives in memory (or an env var /
+    /// secret store) only — an empty string is written, which pbjson omits
+    /// from the serialized document entirely.
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), StoreError> {
         let path = path.as_ref();
         let persisted = PersistedPolicies {
-            endpoint: self.endpoint.clone(),
+            endpoint: self.endpoint.clone().map(redact_policy_secrets),
             server: self.server.clone(),
         };
         let json = serde_json::to_vec_pretty(&persisted)?;
@@ -403,6 +416,37 @@ mod tests {
         ));
         let out = gate.scan_dlp("ssn 123-45-6789").unwrap();
         assert!(out.redacted_content.contains("[REDACTED:ssn]"));
+    }
+
+    #[test]
+    fn save_redacts_safety_api_key() {
+        let mut store = PolicyStore::new();
+        let mut ep = endpoint("v1", vec![]);
+        ep.safety = Some(fabric_types::policy::SafetyConfig {
+            endpoint_url: "http://safety.local".into(),
+            model: "guard".into(),
+            parser: "nemotron_cs".into(),
+            timeout_ms: 500,
+            fail_mode: 0,
+            rules: vec![],
+            default_action: 0,
+            api_key: "super-secret-token".into(),
+            extra_body_json: String::new(),
+            system_prompt: String::new(),
+        });
+        store.load_endpoint(ep).unwrap();
+
+        let path =
+            std::env::temp_dir().join(format!("fabric-policy-redact-{}.json", std::process::id()));
+        store.save(&path).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert!(!raw.contains("super-secret-token"), "{raw}");
+        assert!(!raw.contains("apiKey"), "{raw}");
+        // The in-memory copy still holds the key; only the file is redacted.
+        let gate_cfg = store.endpoint.as_ref().unwrap().safety.as_ref().unwrap();
+        assert_eq!(gate_cfg.api_key, "super-secret-token");
     }
 
     #[test]

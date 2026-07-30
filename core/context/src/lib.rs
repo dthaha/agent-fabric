@@ -18,7 +18,7 @@ pub mod reconcile;
 pub mod store;
 pub mod tool_call;
 
-pub use clock::{is_clock_sane, now_ms, MonotonicClock};
+pub use clock::{is_clock_sane, is_timestamp_sane, now_ms, MonotonicClock};
 
 pub use conflict::{
     detect_in_region, detect_pair, StructuralConflict, StructuralDisposition, StructuralVerdict,
@@ -40,6 +40,7 @@ pub use decoder::{
 };
 pub use handoff::{
     abort_handoff, ack_handoff, catch_up, execute_handoff, CatchUpError, DEFAULT_HANDOFF_TIMEOUT,
+    DEFAULT_LEASE_TTL_MS, MAX_LEASE_TTL_MS,
 };
 pub use mediator::{
     parse_proposal, ConflictMediator, MediatorError, MediatorInput, SharedEntityView, StubMediator,

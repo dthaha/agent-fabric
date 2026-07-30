@@ -8,6 +8,15 @@ use std::sync::Mutex;
 /// Milliseconds since the Unix epoch (UTC) at 2024-01-01T00:00:00Z.
 const MIN_SANE_MS: i64 = 1_704_067_200_000;
 
+/// Milliseconds since the Unix epoch (UTC) at 2020-01-01T00:00:00Z. Entry
+/// `created_at` timestamps older than this are insane (the fabric did not
+/// exist); used by the replay path to flag garbage endpoint clocks.
+const MIN_SANE_TIMESTAMP_MS: i64 = 1_577_836_800_000;
+
+/// How far into the future an entry `created_at` may be before it counts as
+/// insane (24h of clock skew tolerance).
+const MAX_FUTURE_SKEW_MS: i64 = 86_400_000;
+
 /// Current time in milliseconds since the Unix epoch, UTC. This is a wall
 /// clock reading: it may go backwards across calls (NTP adjustments), so
 /// conflict-resolution timestamps should come from [`MonotonicClock`]
@@ -25,6 +34,15 @@ pub fn now_ms() -> i64 {
 /// against garbage timestamps polluting the op-log.
 pub fn is_clock_sane() -> bool {
     now_ms() >= MIN_SANE_MS
+}
+
+/// Sanity check on an entry `created_at` timestamp (epoch milliseconds):
+/// sane means not before 2020 and not more than 24h in the future. Per
+/// ADR 006 ("accept everything") an insane timestamp is flagged, never
+/// rejected — `created_at` is an untrusted endpoint claim and merge
+/// ordering does not depend on it.
+pub fn is_timestamp_sane(ms: i64) -> bool {
+    ms >= MIN_SANE_TIMESTAMP_MS && ms <= now_ms().saturating_add(MAX_FUTURE_SKEW_MS)
 }
 
 /// Per-writer monotonic timestamp source. Each tick returns
@@ -62,6 +80,17 @@ mod tests {
     #[test]
     fn clock_is_sane() {
         assert!(is_clock_sane());
+    }
+
+    #[test]
+    fn timestamp_sanity_bounds() {
+        // 2026-ish now is sane.
+        assert!(is_timestamp_sane(now_ms()));
+        // 1970 and 2019 are insane (before 2020).
+        assert!(!is_timestamp_sane(0));
+        assert!(!is_timestamp_sane(1_000_000_000_000));
+        // 2099 is insane (far future).
+        assert!(!is_timestamp_sane(4_070_889_600_000));
     }
 
     #[test]

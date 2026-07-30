@@ -188,46 +188,48 @@ the corresponding proto structs.
 
 File path: `/etc/fabric/policy.json` (or `FABRIC_POLICY_PATH` env)
 
-Format: the existing `fabric-mdm/v1` JSON wrapper (minus `signature`):
+Format: the existing `fabric-mdm/v1` JSON wrapper (minus `signature`).
+Field names on the wire are camelCase per the protobuf JSON mapping
+(pbjson); snake_case is still accepted on read for compatibility:
 
 ```json
 {
   "format": "fabric-mdm/v1",
   "policy": {
-    "policy_id": "org-acme-2026-07",
+    "policyId": "org-acme-2026-07",
     "version": "1.2.0",
-    "org_id": "acme-corp",
-    "kill_switch": false,
-    "max_retention_hours": 720,
-    "data_rules": [
+    "orgId": "acme-corp",
+    "killSwitch": false,
+    "maxRetentionHours": 720,
+    "dataRules": [
       {
-        "data_class": "pii",
-        "may_leave_device": false,
-        "requires_redaction": true,
-        "allowed_destinations": []
+        "dataClass": "pii",
+        "mayLeaveDevice": false,
+        "requiresRedaction": true,
+        "allowedDestinations": []
       }
     ],
-    "tool_rules": [
+    "toolRules": [
       {
-        "tool_pattern": "shell.*",
+        "toolPattern": "shell.*",
         "action": "confirm",
-        "max_calls_per_session": 50
+        "maxCallsPerSession": 50
       }
     ],
-    "model_rules": [
+    "modelRules": [
       {
-        "model_pattern": "local/*",
+        "modelPattern": "local/*",
         "action": "allow",
-        "max_tokens_per_call": 0
+        "maxTokensPerCall": 0
       }
     ],
     "cua": {
       "enabled": true,
-      "max_screen_area": 0.8,
-      "require_confirmation": true,
-      "blocked_apps": ["com.apple.Terminal"]
+      "maxScreenArea": 0.8,
+      "requireConfirmation": true,
+      "blockedApps": ["com.apple.Terminal"]
     },
-    "dlp_patterns": [
+    "dlpPatterns": [
       {
         "name": "us-ssn",
         "regex": "\\b\\d{3}-\\d{2}-\\d{4}\\b",
@@ -236,7 +238,7 @@ Format: the existing `fabric-mdm/v1` JSON wrapper (minus `signature`):
     ],
     "safety": {
       "enabled": true,
-      "fail_mode": "closed",
+      "failMode": "closed",
       "rules": [
         { "category": "violence", "action": "block" },
         { "category": "injection", "action": "block" }
@@ -250,7 +252,7 @@ Format: the existing `fabric-mdm/v1` JSON wrapper (minus `signature`):
 
 - macOS plist: PascalCase (Apple convention)
 - Intune OMA-URI: PascalCase (Microsoft convention)
-- JSON: snake_case (proto/serde convention)
+- JSON: camelCase (protobuf JSON mapping; snake_case accepted on read)
 
 The daemon normalizes all three to the internal `EndpointPolicy` proto
 struct. Admins configure in their platform's native convention; no

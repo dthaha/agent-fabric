@@ -18,6 +18,11 @@ use fabric_types::lease::{HandoffAck, HandoffRequest, Lease};
 /// holder crashes without releasing.
 pub const DEFAULT_LEASE_TTL_MS: i64 = 3_600_000;
 
+/// Maximum TTL a caller may request (1 hour). Unbounded TTLs would let a
+/// crashed holder lock a session forever. Currently equal to the default:
+/// the turn-scoped safety net is the only posture the fabric supports.
+pub const MAX_LEASE_TTL_MS: i64 = 3_600_000;
+
 /// How long a HANDED_OFF session waits for [`ack_handoff`] before it may be
 /// recovered via [`abort_handoff`]. Without an abort path, a new holder that
 /// crashes after the transfer but before acking would wedge the session in

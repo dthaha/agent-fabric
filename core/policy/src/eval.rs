@@ -5,6 +5,7 @@
 
 use regex::Regex;
 use thiserror::Error;
+use tracing::warn;
 
 use fabric_types::policy::{DlpAction, DlpPattern, EffectivePolicy, ToolAction};
 
@@ -34,11 +35,20 @@ pub enum ModelLocus {
     Server,
 }
 
+/// A DLP pattern with its regex compiled once at gate construction. Regex
+/// compilation is the expensive part of a scan; per-scan compilation would
+/// redo it on every payload.
+struct CompiledDlpPattern {
+    name: String,
+    action: i32,
+    regex: Regex,
+}
+
 /// The policy gate. Constructed from an EffectivePolicy (the merged product
 /// of endpoint + server policy) and consulted before every privileged act.
 pub struct PolicyGate {
     effective: EffectivePolicy,
-    dlp_patterns: Vec<DlpPattern>,
+    dlp_patterns: Vec<CompiledDlpPattern>,
 }
 
 impl PolicyGate {
@@ -305,18 +315,15 @@ impl PolicyGate {
     }
 
     /// Scan content against DLP patterns. Returns the redacted content and
-    /// the strictest action found across all matches.
+    /// the strictest action found across all matches. Patterns were compiled
+    /// once when the gate was built; scanning only runs the matches.
     pub fn scan_dlp(&self, content: &str) -> std::result::Result<DlpOutcome, EvalError> {
         let mut redacted = content.to_string();
         let mut strictest: Option<DlpAction> = None;
         let mut hits = Vec::new();
 
-        for pattern in self.effective_dlp_patterns() {
-            let re = Regex::new(&pattern.regex).map_err(|source| EvalError::InvalidDlpPattern {
-                name: pattern.name.clone(),
-                source,
-            })?;
-            if !re.is_match(&redacted) {
+        for pattern in &self.dlp_patterns {
+            if !pattern.regex.is_match(&redacted) {
                 continue;
             }
             let action = DlpAction::try_from(pattern.action).unwrap_or(DlpAction::LogOnly);
@@ -329,7 +336,8 @@ impl PolicyGate {
             if action == DlpAction::Redact {
                 // NoExpand: the replacement is literal text; a `$` in a
                 // pattern name must not be read as a capture reference.
-                redacted = re
+                redacted = pattern
+                    .regex
                     .replace_all(
                         &redacted,
                         regex::NoExpand(format!("[REDACTED:{}]", pattern.name).as_str()),
@@ -345,17 +353,25 @@ impl PolicyGate {
         })
     }
 
-    fn effective_dlp_patterns(&self) -> impl Iterator<Item = &DlpPattern> {
-        // DLP patterns live on the endpoint policy; they are attached to the
-        // gate via `with_dlp_patterns` rather than carried in the merged
-        // EffectivePolicy message.
-        self.dlp_patterns.iter()
-    }
-
     /// Attach endpoint DLP patterns to the gate (they are endpoint-side and
-    /// not part of the merged EffectivePolicy message).
+    /// not part of the merged EffectivePolicy message). Regexes are compiled
+    /// ONCE here; an invalid pattern is skipped with a warning (it simply
+    /// never matches) rather than failing every scan at runtime.
     pub fn with_dlp_patterns(mut self, patterns: Vec<DlpPattern>) -> Self {
-        self.dlp_patterns = patterns;
+        self.dlp_patterns = patterns
+            .into_iter()
+            .filter_map(|p| match Regex::new(&p.regex) {
+                Ok(regex) => Some(CompiledDlpPattern {
+                    name: p.name,
+                    action: p.action,
+                    regex,
+                }),
+                Err(e) => {
+                    warn!(pattern = %p.name, error = %e, "invalid DLP pattern skipped at gate construction");
+                    None
+                }
+            })
+            .collect();
         self
     }
 }
@@ -645,6 +661,31 @@ mod tests {
 
         let out = g.scan_dlp("nothing sensitive").unwrap();
         assert_eq!(out.action, None);
+    }
+
+    #[test]
+    fn dlp_patterns_compile_once_at_gate_construction() {
+        // Patterns are compiled by with_dlp_patterns; every scan reuses the
+        // compiled regexes. Functional check: repeated scans stay correct.
+        let g = gate(vec![]).with_dlp_patterns(vec![
+            DlpPattern {
+                name: "ssn".into(),
+                regex: r"\b\d{3}-\d{2}-\d{4}\b".into(),
+                action: DlpAction::Redact as i32,
+            },
+            DlpPattern {
+                name: "broken".into(),
+                regex: r"([unclosed".into(),
+                action: DlpAction::Block as i32,
+            },
+        ]);
+        // The invalid pattern was skipped at construction (warning logged);
+        // it does not fail the scan.
+        for _ in 0..2 {
+            let out = g.scan_dlp("ssn 123-45-6789").unwrap();
+            assert!(out.redacted_content.contains("[REDACTED:ssn]"));
+            assert_eq!(out.matched_patterns, vec!["ssn".to_string()]);
+        }
     }
 
     #[test]

@@ -26,6 +26,7 @@ use fabric_context::clock::now_ms;
 use fabric_context::db::ms_to_timestamp;
 use fabric_context::{
     ContextStore, LeaseAuthority, ReconcileReport, SqliteContextStore, StoreError,
+    DEFAULT_LEASE_TTL_MS, MAX_LEASE_TTL_MS,
 };
 use fabric_types::context::{Locus, SessionMeta, SessionState};
 use fabric_types::lease::{
@@ -39,24 +40,17 @@ use tracing::{info, warn};
 use crate::identity::{identity_middleware, Identity, IdentityContext};
 use crate::soul::SoulRegistry;
 
-/// Default TTL for leases granted via preempt/presence, where the caller does
-/// not specify one. Matches the turn-scoped safety-net posture of the core
-/// store: generous, only firing when a holder crashes without releasing.
-const DEFAULT_LEASE_TTL_MS: i64 = 3_600_000;
-
-/// Maximum TTL a caller may request (1 hour). Unbounded TTLs would let a
-/// crashed holder lock a session forever.
-const MAX_TTL_MS: i64 = 3_600_000;
-
 /// Resolve and validate a caller-supplied TTL. Absent means the default;
-/// out-of-range is a 400.
+/// out-of-range is a 400. The bounds are the context crate's
+/// [`DEFAULT_LEASE_TTL_MS`] / [`MAX_LEASE_TTL_MS`] (single definition,
+/// shared with the core store's turn-scoped safety-net posture).
 fn resolve_ttl(ttl_ms: Option<i64>) -> Result<i64, (StatusCode, Json<Value>)> {
     let ttl = ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS);
-    if !(1..=MAX_TTL_MS).contains(&ttl) {
+    if !(1..=MAX_LEASE_TTL_MS).contains(&ttl) {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({
-                "error": format!("ttl_ms must be between 1 and {MAX_TTL_MS}")
+                "error": format!("ttl_ms must be between 1 and {MAX_LEASE_TTL_MS}")
             })),
         ));
     }
@@ -481,6 +475,24 @@ async fn replay(
     Identity(ctx): Identity,
     Json(req): Json<ReplayRequest>,
 ) -> Result<Json<ReconcileReport>, Response> {
+    // Validate the seq range before touching the store: seq 0 is not a
+    // valid op-log position (seqs start at 1) and anything above i64::MAX
+    // cannot be represented in SQLite's INTEGER column.
+    for entry in &req.entries {
+        if entry.seq == 0 || entry.seq > i64::MAX as u64 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": format!(
+                        "entry {} has out-of-range seq {}; must be 1..=i64::MAX",
+                        entry.entry_id, entry.seq
+                    )
+                })),
+            )
+                .into_response());
+        }
+    }
+
     ensure_session(&state.store, &req.session_id, &ctx).await?;
 
     // ADR 006: the server clock is authoritative. Overwrite received_at on
@@ -509,6 +521,24 @@ async fn replay(
         .map_err(store_err)?
         .map_err(store_err)?;
     for entry in &req.entries {
+        // created_at is an untrusted endpoint claim: flag insane clocks
+        // (pre-2020 or far-future) for the audit log. ADR 006 is
+        // "accept everything" — warn, never reject; merge ordering uses
+        // the server-stamped received_at, so a garbage created_at cannot
+        // forge priority.
+        let created_ms = entry.created_at.as_ref().map_or(0, |t| {
+            t.seconds
+                .saturating_mul(1000)
+                .saturating_add(i64::from(t.nanos) / 1_000_000)
+        });
+        if !fabric_context::clock::is_timestamp_sane(created_ms) {
+            warn!(
+                session = %req.session_id,
+                entry = %entry.entry_id,
+                created_ms,
+                "replayed entry has insane created_at clock; accepted per ADR 006"
+            );
+        }
         let mut stamped = entry.clone();
         stamped.received_at = Some(ms_to_timestamp(received_ms));
         ContextStore::insert_entry_raw(&staging, &stamped)
@@ -797,7 +827,7 @@ mod tests {
     async fn acquire_and_renew_reject_out_of_range_ttl() {
         let app = router(test_state());
 
-        for ttl in [0, -5, MAX_TTL_MS + 1] {
+        for ttl in [0, -5, MAX_LEASE_TTL_MS + 1] {
             let (code, body) = request(
                 &app,
                 "POST",
@@ -825,7 +855,7 @@ mod tests {
         assert_eq!(code, StatusCode::OK, "{lease}");
         let lease_id = lease["leaseId"].as_str().unwrap();
 
-        for ttl in [0, -1, MAX_TTL_MS + 1] {
+        for ttl in [0, -1, MAX_LEASE_TTL_MS + 1] {
             let (code, body) = request(
                 &app,
                 "POST",
@@ -839,14 +869,14 @@ mod tests {
             assert_eq!(code, StatusCode::BAD_REQUEST, "ttl {ttl}: {body}");
         }
 
-        // Boundary value: exactly MAX_TTL_MS is accepted.
+        // Boundary value: exactly MAX_LEASE_TTL_MS is accepted.
         let (code, body) = request(
             &app,
             "POST",
             "/lease/renew",
             Some(json!({
                 "lease_id": lease_id,
-                "ttl_ms": MAX_TTL_MS,
+                "ttl_ms": MAX_LEASE_TTL_MS,
             })),
         )
         .await;
@@ -954,6 +984,76 @@ mod tests {
             .unwrap();
         let ids: Vec<&str> = entries.iter().map(|e| e.entry_id.as_str()).collect();
         assert_eq!(ids, ["e1", "e2", "e3"]);
+    }
+
+    #[tokio::test]
+    async fn replay_rejects_out_of_range_seq() {
+        let state = test_state();
+        let app = router(Arc::clone(&state));
+
+        // seq 0 is not a valid op-log position.
+        let (code, body) = request(
+            &app,
+            "POST",
+            "/context/replay",
+            Some(json!({
+                "session_id": "s1",
+                "entries": [entry_json("e0", "s1", 0, 1_000)],
+            })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body["error"].as_str().unwrap().contains("seq"));
+
+        // seq beyond i64::MAX cannot be stored in SQLite's INTEGER column.
+        let (code, body) = request(
+            &app,
+            "POST",
+            "/context/replay",
+            Some(json!({
+                "session_id": "s1",
+                "entries": [entry_json("emax", "s1", u64::MAX, 1_000)],
+            })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
+
+        // Nothing was staged or merged.
+        assert!(ContextStore::entries_since(&state.store, "s1", 0)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn replay_accepts_insane_created_at_with_a_warning() {
+        let state = test_state();
+        let app = router(Arc::clone(&state));
+
+        // ADR 006 is "accept everything": an entry created in the year 2099
+        // (endpoint clock garbage) is still merged — the server-stamped
+        // received_at carries the ordering, so the claim is harmless. The
+        // handler logs a warning; the merge must not panic or reject.
+        let future_ms = 4_070_889_600_000; // 2099-01-01T00:00:00Z
+        let (code, report) = request(
+            &app,
+            "POST",
+            "/context/replay",
+            Some(json!({
+                "session_id": "s1",
+                "entries": [entry_json("future", "s1", 1, future_ms)],
+            })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "{report}");
+        assert_eq!(report["applied"], 1);
+
+        let stored = state.store.entry_by_id("future").unwrap().unwrap();
+        assert_eq!(
+            stored.created_at.as_ref().unwrap().seconds,
+            future_ms / 1000,
+            "created_at is preserved verbatim (untrusted claim, audit only)"
+        );
     }
 
     #[tokio::test]

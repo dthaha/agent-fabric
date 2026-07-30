@@ -23,6 +23,16 @@ mod plist_parser;
 /// Format marker prefix carried by MDM wrapper documents.
 pub const PACK_FORMAT_PREFIX: &str = "fabric-mdm/";
 
+/// Maximum accepted policy pack size (1 MiB). A policy document is a few
+/// KiB; anything larger is a corrupt or hostile payload and must not be
+/// parsed (XML/JSON parsers are not memory-bounded on adversarial input).
+pub const MAX_PACK_SIZE: usize = 1_048_576;
+
+/// How many leading bytes `detect_format` scans for the `<plist` marker.
+/// Plist documents can carry long XML comments or payload declarations
+/// before the root element; 4 KiB is not always enough.
+const PLIST_SNIFF_BYTES: usize = 65_536;
+
 #[derive(Debug, Error)]
 pub enum MdmError {
     #[error("reading policy pack {path}: {source}")]
@@ -40,6 +50,8 @@ pub enum MdmError {
     UnsupportedFormat(String),
     #[error("invalid policy pack: {0}")]
     Validation(String),
+    #[error("policy pack too large: {0} bytes (max {MAX_PACK_SIZE})")]
+    PackTooLarge(usize),
 }
 
 pub type Result<T> = std::result::Result<T, MdmError>;
@@ -74,11 +86,13 @@ pub fn is_policy_pack(bytes: &[u8]) -> bool {
 /// Detect the wire format of a policy pack from its leading bytes: XML
 /// documents containing a `<plist` element are Jamf plists, other XML
 /// documents are treated as Intune OMA-URI, and everything else is JSON.
+/// The `<plist` marker is searched within the first [`PLIST_SNIFF_BYTES`]
+/// so leading XML comments cannot hide it.
 pub fn detect_format(bytes: &[u8]) -> PackFormat {
     let text = std::str::from_utf8(bytes).unwrap_or("");
     let trimmed = text.trim_start_matches('\u{feff}').trim_start();
     if trimmed.starts_with('<') {
-        let head = &trimmed[..trimmed.len().min(4096)];
+        let head = trimmed.get(..PLIST_SNIFF_BYTES).unwrap_or(trimmed);
         if head.contains("<plist") {
             PackFormat::Plist
         } else {
@@ -91,8 +105,12 @@ pub fn detect_format(bytes: &[u8]) -> PackFormat {
 
 /// Parse an MDM policy pack using an explicit wire format. The resulting
 /// policy is validated: `policy_id`, `version`, and `org_id` must all be
-/// non-empty.
+/// non-empty. Packs larger than [`MAX_PACK_SIZE`] are rejected before any
+/// parsing happens.
 pub fn parse_with_format(bytes: &[u8], format: PackFormat) -> Result<EndpointPolicy> {
+    if bytes.len() > MAX_PACK_SIZE {
+        return Err(MdmError::PackTooLarge(bytes.len()));
+    }
     let policy = match format {
         PackFormat::Json => parse_json(bytes)?,
         PackFormat::Plist => plist_parser::parse(bytes)?,
@@ -246,6 +264,45 @@ mod tests {
             load_mdm_policy(Path::new("/nonexistent/pack.json")),
             Err(MdmError::Io { .. })
         ));
+    }
+
+    #[test]
+    fn oversized_pack_is_rejected_before_parsing() {
+        let mut bytes = b"{\"policyId\":\"ep-1\"".to_vec();
+        bytes.resize(MAX_PACK_SIZE + 1, b' ');
+        let err = parse_policy_pack(&bytes).unwrap_err();
+        assert!(matches!(err, MdmError::PackTooLarge(n) if n == MAX_PACK_SIZE + 1));
+
+        // Explicit-format parsing is guarded too.
+        let err = parse_with_format(&bytes, PackFormat::Json).unwrap_err();
+        assert!(matches!(err, MdmError::PackTooLarge(_)));
+
+        // Exactly at the cap is accepted for parsing (trailing whitespace
+        // is valid JSON).
+        let mut at_cap = serde_json::to_vec(&bare_policy_json()).unwrap();
+        assert!(at_cap.len() < MAX_PACK_SIZE);
+        at_cap.resize(MAX_PACK_SIZE, b' ');
+        let policy = parse_policy_pack(&at_cap).unwrap();
+        assert_eq!(policy.policy_id, "ep-1");
+    }
+
+    #[test]
+    fn plist_marker_after_long_leading_comment_is_detected() {
+        // >4 KiB of XML comment before the root element must not hide the
+        // <plist marker (the sniff window covers 64 KiB).
+        let comment = "x".repeat(8_000);
+        let doc = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- {comment} -->\n\
+             <plist version=\"1.0\">\n<dict>\n\
+             \x20   <key>PolicyID</key>\n    <string>ep-mac</string>\n\
+             \x20   <key>Version</key>\n    <string>v1</string>\n\
+             \x20   <key>OrgID</key>\n    <string>org-1</string>\n\
+             </dict>\n</plist>\n"
+        );
+        let bytes = doc.as_bytes();
+        assert_eq!(detect_format(bytes), PackFormat::Plist);
+        let policy = parse_policy_pack(bytes).unwrap();
+        assert_eq!(policy.policy_id, "ep-mac");
     }
 
     #[test]

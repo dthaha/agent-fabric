@@ -17,6 +17,10 @@ use thiserror::Error;
 
 const SCHEMA: &str = include_str!("schema.sql");
 
+/// Sighting-write debounce window, as a SQLite datetime modifier: a device
+/// whose `last_seen_at` is younger than this is not written again.
+const DEVICE_SIGHTING_DEBOUNCE_SQL: &str = "-5 minutes";
+
 #[derive(Debug, Error)]
 pub enum SoulError {
     #[error("sqlite error: {0}")]
@@ -24,6 +28,27 @@ pub enum SoulError {
 }
 
 pub type Result<T> = std::result::Result<T, SoulError>;
+
+/// The live (non-soft-deleted) SOUL for `(user_id, org_id)`, if one exists.
+fn soul_for_user_org(db: &Connection, user_id: &str, org_id: &str) -> Result<Option<Soul>> {
+    Ok(db
+        .query_row(
+            "SELECT soul_id, user_id, org_id, created_at, deleted_at
+             FROM souls
+             WHERE user_id = ?1 AND org_id = ?2 AND deleted_at IS NULL",
+            params![user_id, org_id],
+            |row| {
+                Ok(Soul {
+                    soul_id: row.get(0)?,
+                    user_id: row.get(1)?,
+                    org_id: row.get(2)?,
+                    created_at: row.get(3)?,
+                    deleted_at: row.get(4)?,
+                })
+            },
+        )
+        .optional()?)
+}
 
 /// A Fabric-minted SOUL: one per user per org. `deleted_at` is the GDPR
 /// soft-delete marker; a deleted SOUL is never resolved again.
@@ -91,24 +116,7 @@ impl SoulRegistry {
     /// SOUL was deleted, a new one is minted.
     pub fn resolve_or_create_soul(&self, user_id: &str, org_id: &str) -> Result<Soul> {
         let db = self.db();
-        let existing = db
-            .query_row(
-                "SELECT soul_id, user_id, org_id, created_at, deleted_at
-                 FROM souls
-                 WHERE user_id = ?1 AND org_id = ?2 AND deleted_at IS NULL",
-                params![user_id, org_id],
-                |row| {
-                    Ok(Soul {
-                        soul_id: row.get(0)?,
-                        user_id: row.get(1)?,
-                        org_id: row.get(2)?,
-                        created_at: row.get(3)?,
-                        deleted_at: row.get(4)?,
-                    })
-                },
-            )
-            .optional()?;
-        if let Some(soul) = existing {
+        if let Some(soul) = soul_for_user_org(&db, user_id, org_id)? {
             return Ok(soul);
         }
 
@@ -119,13 +127,28 @@ impl SoulRegistry {
             params![user_id, org_id],
         )?;
         let soul_id = uuid::Uuid::new_v4().to_string();
-        db.execute(
+        let insert = db.execute(
             "INSERT INTO souls (soul_id, user_id, org_id) VALUES (?1, ?2, ?3)",
             params![soul_id, user_id, org_id],
-        )?;
-        drop(db);
-        self.get_soul(&soul_id)?
-            .ok_or_else(|| SoulError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+        );
+        match insert {
+            Ok(_) => {
+                drop(db);
+                self.get_soul(&soul_id)?
+                    .ok_or_else(|| SoulError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+            }
+            // Lost a create race: another writer inserted the same
+            // (user_id, org_id) between our SELECT and INSERT. Re-select
+            // and return the winner's row. (Cannot happen under SQLite's
+            // single connection; the pattern is for the Postgres target.)
+            Err(rusqlite::Error::SqliteFailure(ref e, _))
+                if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                soul_for_user_org(&db, user_id, org_id)?
+                    .ok_or_else(|| SoulError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+            }
+            Err(e) => Err(SoulError::Sqlite(e)),
+        }
     }
 
     /// Fetch a SOUL by id, including soft-deleted ones.
@@ -162,6 +185,9 @@ impl SoulRegistry {
 
     /// Record a device sighting: insert on first authenticated request,
     /// update `last_seen_at` (and mutable attributes) on subsequent ones.
+    /// Updates are debounced: a device seen within the last 5 minutes is
+    /// not written again — the identity middleware calls this on EVERY
+    /// request, and a per-request UPSERT is pure write amplification.
     pub fn record_device(
         &self,
         device_sub: &str,
@@ -183,7 +209,8 @@ impl SoulRegistry {
                                ELSE devices.org_id END,
                  platform = CASE WHEN excluded.platform != 'unknown'
                                  THEN excluded.platform
-                                 ELSE devices.platform END",
+                                 ELSE devices.platform END
+             WHERE devices.last_seen_at < datetime('now', ?6)",
             params![
                 device_sub,
                 uuid::Uuid::new_v4().to_string(),
@@ -194,6 +221,7 @@ impl SoulRegistry {
                 } else {
                     platform
                 },
+                DEVICE_SIGHTING_DEBOUNCE_SQL,
             ],
         )?;
         drop(db);
@@ -317,6 +345,44 @@ mod tests {
         assert_eq!(third.display_name, "Hermes MacBook");
         assert_eq!(third.org_id, "org-1");
         assert_eq!(third.platform, "macos");
+    }
+
+    #[test]
+    fn record_device_sightings_are_debounced() {
+        let reg = registry();
+        reg.record_device("dev-sub-1", "laptop", "org-1", "macos")
+            .unwrap();
+
+        // A sighting within the debounce window is not written: the stored
+        // last_seen_at is byte-identical afterwards. Use a sentinel value
+        // one minute old so the assertion does not depend on wall-clock
+        // resolution.
+        reg.db()
+            .execute(
+                "UPDATE devices SET last_seen_at = datetime('now', '-1 minute')
+                 WHERE device_sub = 'dev-sub-1'",
+                [],
+            )
+            .unwrap();
+        let fresh = reg.get_device("dev-sub-1").unwrap().unwrap().last_seen_at;
+        let again = reg
+            .record_device("dev-sub-1", "laptop", "org-1", "macos")
+            .unwrap();
+        assert_eq!(again.last_seen_at, fresh, "recent sighting must not write");
+
+        // A sighting older than the window IS written.
+        reg.db()
+            .execute(
+                "UPDATE devices SET last_seen_at = datetime('now', '-10 minutes')
+                 WHERE device_sub = 'dev-sub-1'",
+                [],
+            )
+            .unwrap();
+        let stale = reg.get_device("dev-sub-1").unwrap().unwrap().last_seen_at;
+        let updated = reg
+            .record_device("dev-sub-1", "laptop", "org-1", "macos")
+            .unwrap();
+        assert_ne!(updated.last_seen_at, stale, "stale sighting must write");
     }
 
     #[test]

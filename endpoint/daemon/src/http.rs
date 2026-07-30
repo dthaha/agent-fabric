@@ -146,7 +146,10 @@ async fn sessions(State(state): State<Arc<DaemonState>>) -> Json<Value> {
 /// Summary of the current effective policy. Read-only admin endpoint for
 /// the CLI.
 async fn policy(State(state): State<Arc<DaemonState>>) -> Json<Value> {
-    let policy = state.policy.read().expect("policy lock poisoned");
+    // Recover a poisoned lock instead of panicking: a crashed writer leaves
+    // the store usable, and a localhost status endpoint must never take the
+    // daemon down.
+    let policy = state.policy.read().unwrap_or_else(|e| e.into_inner());
     let effective = policy.effective();
     Json(json!({
         "endpoint_version": policy.endpoint_version().unwrap_or(""),
@@ -162,11 +165,23 @@ async fn policy(State(state): State<Arc<DaemonState>>) -> Json<Value> {
 /// reflects deny-wins downgrades. Callers may include a `model_advisory`
 /// in the body; Phase 5 will populate it from the seeded on-device
 /// classifier model.
+///
+/// Unlike `/readyz` this endpoint degrades gracefully when no policy is
+/// loaded — deliberately: classification is a LOCAL advisory decision that
+/// must keep working offline (the offline-first invariant), and the empty
+/// gate is already fail-safe (no inference rules → the wrapper downgrades
+/// every decision to the endpoint, which is the safe local-only answer).
+/// `/readyz` exists to tell supervisors whether the daemon is enforcing
+/// policy at all, so it correctly stays 503 until a policy is loaded.
 async fn classify(
     State(state): State<Arc<DaemonState>>,
     Json(input): Json<ClassifyInput>,
 ) -> Json<LocusDecision> {
-    let gate = state.policy.read().expect("policy lock poisoned").gate();
+    let gate = state
+        .policy
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .gate();
     let classifier = PolicyAwareClassifier::new(RulesClassifier::new(), gate);
     Json(classifier.classify(&input))
 }

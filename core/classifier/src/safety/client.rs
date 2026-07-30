@@ -166,7 +166,10 @@ impl SafetyClient {
 
         let status = response.status();
         if !status.is_success() {
+            // Truncate the echoed body: upstream error pages can be huge and
+            // may contain endpoint internals that do not belong in logs.
             let body_text = response.text().await.unwrap_or_default();
+            let body_text: String = body_text.chars().take(256).collect();
             return Err(SafetyError::Http(format!(
                 "endpoint returned {status}: {body_text}"
             )));

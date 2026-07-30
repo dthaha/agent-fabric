@@ -27,6 +27,13 @@ use crate::store::ContextStore;
 /// Disposition stamped on replayed entries that violate policy (ADR 006).
 pub const DISPOSITION_QUARANTINE: &str = "QUARANTINE";
 
+/// Half-width of the structural-detection window: detection runs over the
+/// merged region — entries within ±[`DETECTION_WINDOW`] seq of the applied
+/// (newly merged) entries — not the whole session log. Unbounded detection
+/// is O(n²) in session length; a merge conflict can only involve entries
+/// near the insertion points.
+const DETECTION_WINDOW: u64 = 50;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeqConflict {
     pub seq: u64,
@@ -168,9 +175,29 @@ pub async fn reconcile(
     // pairs involving at least one entry that arrived from the remote side
     // (a pre-existing collision within one replica is not a merge conflict).
     // Deterministic, model-free, no I/O beyond the local store read.
+    //
+    // Detection runs over a ±DETECTION_WINDOW seq window around the applied
+    // entries, not the whole log: pairwise detection is O(w²) in the window
+    // instead of O(n²) in the session length.
     if !applied_ids.is_empty() {
+        let lo = applied_entries
+            .iter()
+            .map(|e| e.seq)
+            .min()
+            .unwrap_or(0)
+            .saturating_sub(DETECTION_WINDOW);
+        let hi = applied_entries
+            .iter()
+            .map(|e| e.seq)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(DETECTION_WINDOW);
         let merged = local.entries_since(session_id, 0).await?;
-        report.structural_conflicts = detect_in_region(&merged)
+        let window: Vec<ContextEntry> = merged
+            .into_iter()
+            .filter(|e| e.seq >= lo && e.seq <= hi)
+            .collect();
+        report.structural_conflicts = detect_in_region(&window)
             .into_iter()
             .filter(|c| applied_ids.contains(&c.entry_id_a) || applied_ids.contains(&c.entry_id_b))
             .collect();
@@ -388,7 +415,8 @@ mod tests {
             c.disposition,
             crate::conflict::StructuralDisposition::LastWriteWins
         );
-        // Later (created_at, entry_id) writes last: ep-call (t=2000) wins.
+        // Later (received_at, entry_id) writes last — created_at fallback
+        // here, so ep-call (t=2000) wins.
         assert_eq!(c.lww_winner_entry_id.as_deref(), Some("ep-call"));
     }
 
@@ -497,6 +525,67 @@ mod tests {
             dlp_patterns: vec![],
             safety: None,
         }
+    }
+
+    #[tokio::test]
+    async fn structural_detection_is_bounded_to_the_merge_window() {
+        // A 200-entry session merges 2 new entries at the tail. Detection
+        // runs over the ±50 window around them, not the whole log: a
+        // conflicting partner FAR outside the window is not flagged, one
+        // inside it is.
+        let endpoint = replica("s1", "l1", "endpoint-1");
+        let server = replica("s1", "l2", "server-1");
+
+        // Pre-existing log: seq 1..200. Seq 1 is a tool call on the same
+        // target the remote merge will touch — but 200+ seqs away.
+        let distant = tool_call_entry(
+            "distant-call",
+            "endpoint-1",
+            1000,
+            1,
+            tool_call("set_config", "ui.theme", "blue", ""),
+        );
+        endpoint.insert_entry_raw(&distant).unwrap();
+        for seq in 2..=199u64 {
+            let mut filler = entry_at(&format!("f{seq}"), "s1", "endpoint-1", 1000 + seq as i64);
+            filler.seq = seq;
+            endpoint.insert_entry_raw(&filler).unwrap();
+        }
+        // A conflicting partner INSIDE the window, at seq 200.
+        let near = tool_call_entry(
+            "near-call",
+            "endpoint-1",
+            2000,
+            200,
+            tool_call("set_config", "ui.theme", "green", ""),
+        );
+        endpoint.insert_entry_raw(&near).unwrap();
+
+        // The remote side appends two entries at the tail (seq 201, 202);
+        // 201 diverges from BOTH the near and the distant partners.
+        let remote_a = tool_call_entry(
+            "remote-a",
+            "server-1",
+            3000,
+            201,
+            tool_call("set_config", "ui.theme", "red", ""),
+        );
+        server.insert_entry_raw(&remote_a).unwrap();
+        let mut remote_b = entry_at("remote-b", "s1", "server-1", 3001);
+        remote_b.seq = 202;
+        server.insert_entry_raw(&remote_b).unwrap();
+
+        let report = reconcile(&endpoint, &server, "s1", None).await.unwrap();
+        assert_eq!(report.applied, 2);
+        // Only the in-window partner (near-call, seq 200) pairs with
+        // remote-a; distant-call (seq 1) is outside ±50 of seqs 201-202.
+        assert_eq!(report.structural_conflicts.len(), 1);
+        let c = &report.structural_conflicts[0];
+        assert!(
+            (c.entry_id_a == "near-call" && c.entry_id_b == "remote-a")
+                || (c.entry_id_a == "remote-a" && c.entry_id_b == "near-call"),
+            "unexpected pair: {c:?}"
+        );
     }
 
     #[tokio::test]

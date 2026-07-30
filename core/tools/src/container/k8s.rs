@@ -12,7 +12,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::api::{Api, AttachParams, DeleteParams, ListParams, PostParams};
 use kube::Client;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::container::{
     validate_image_allowed, ContainerError, ContainerId, ContainerInfo, ContainerRuntime,
@@ -32,6 +32,9 @@ const MAX_EXEC_OUTPUT_BYTES: u64 = 10_485_760;
 ///
 /// Network isolation (NetworkPolicy) is NOT created by this runtime — that
 /// requires cluster-admin scope and is the cluster operator's responsibility.
+/// A spec requesting [`NetworkPolicy::Restricted`] is therefore REJECTED
+/// (fail closed): running it with default network access would silently
+/// weaken the requested isolation.
 pub struct K8sRuntime {
     client: Client,
     default_namespace: String,
@@ -184,6 +187,21 @@ async fn read_capped(
     Ok((String::from_utf8_lossy(&buf).into_owned(), truncated))
 }
 
+/// Fail closed on network isolation this runtime cannot enforce. A pod
+/// created without the requested restriction would run with DEFAULT network
+/// access — silently weaker than asked for — so the request is refused.
+fn enforce_network_policy(spec: &ContainerSpec) -> Result<(), ContainerError> {
+    if spec.network_policy == NetworkPolicy::Restricted {
+        return Err(ContainerError::Runtime(format!(
+            "network_policy=Restricted requested for container '{}' but this runtime \
+             cannot enforce K8s NetworkPolicy; refusing to create the pod with default \
+             network access",
+            spec.name
+        )));
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl ContainerRuntime for K8sRuntime {
     async fn pull(
@@ -206,13 +224,7 @@ impl ContainerRuntime for K8sRuntime {
 
     async fn create(&self, spec: &ContainerSpec) -> Result<ContainerId, ContainerError> {
         validate_image_allowed(&spec.image, &spec.allowed_registries)?;
-
-        if spec.network_policy == NetworkPolicy::Restricted {
-            warn!(
-                pod = %spec.name,
-                "network_policy=Restricted is not yet enforced; pod will have default network access"
-            );
-        }
+        enforce_network_policy(spec)?;
 
         let ns = self.ns(spec).to_string();
         let pod_name = Self::container_name(spec);
@@ -448,5 +460,37 @@ impl ContainerRuntime for K8sRuntime {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(network_policy: NetworkPolicy) -> ContainerSpec {
+        ContainerSpec {
+            image: "ubuntu:22.04".into(),
+            namespace: String::new(),
+            name: "test".into(),
+            cpu_limit: "500m".into(),
+            memory_limit: "256Mi".into(),
+            network_policy,
+            timeout_s: 60,
+            env: Default::default(),
+            allowed_registries: vec![],
+        }
+    }
+
+    #[test]
+    fn restricted_network_policy_fails_closed() {
+        // Restricted cannot be enforced by this runtime: Err, not a pod
+        // with default network access.
+        let err = enforce_network_policy(&spec(NetworkPolicy::Restricted)).unwrap_err();
+        assert!(matches!(err, ContainerError::Runtime(_)), "{err}");
+        assert!(err.to_string().contains("Restricted"), "{err}");
+
+        // Unrestricted and None request nothing this runtime cannot honor.
+        assert!(enforce_network_policy(&spec(NetworkPolicy::Unrestricted)).is_ok());
+        assert!(enforce_network_policy(&spec(NetworkPolicy::None)).is_ok());
     }
 }

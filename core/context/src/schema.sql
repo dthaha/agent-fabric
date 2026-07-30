@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_org_id
     ON sessions(org_id);
 
+CREATE INDEX IF NOT EXISTS idx_sessions_state
+    ON sessions(state);
+
 CREATE TABLE IF NOT EXISTS context_entries (
     session_id     TEXT NOT NULL,
     seq            INTEGER NOT NULL,
@@ -32,9 +35,6 @@ CREATE TABLE IF NOT EXISTS context_entries (
     PRIMARY KEY (session_id, seq),
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_context_entries_entry_id
-    ON context_entries(entry_id);
 
 CREATE TABLE IF NOT EXISTS leases (
     lease_id      TEXT PRIMARY KEY,

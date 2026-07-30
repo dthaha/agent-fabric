@@ -2,6 +2,8 @@
 
 - Status: accepted
 - Date: 2026-07-26
+- Superseded by: ADR 006 (merge ordering only) — see ADR 006 for the
+  authoritative merge rule, `(received_at, entry_id)`
 
 ## Context
 
@@ -41,9 +43,12 @@ zero runtime behavior change.
 ### Reconnect = deterministic merge, then conflict resolution
 
 - On reconnect the device replays its local op-log to the server.
-- The server merges **deterministically by `(created_at, entry_id)`** —
-  already implemented in `core/context/src/reconcile.rs`. Ordering is free
-  and convergent.
+- The server merges **deterministically by `(received_at, entry_id)`** —
+  implemented in `core/context/src/reconcile.rs`. Ordering is free
+  and convergent. (`received_at` is server-stamped at ingest; the original
+  text here said `(created_at, entry_id)` — superseded by ADR 006, which
+  is the authoritative merge rule. `created_at` remains only as a fallback
+  for entries predating the `received_at` field.)
 - The merge produces a single canonical log; conflict detection then runs
   over the merged region. **The detection unit is the whole turn** (prompt +
   tool calls + response), not an isolated entry.

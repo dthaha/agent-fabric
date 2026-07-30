@@ -230,6 +230,10 @@ pub async fn build_decoder_input(
         .await?
         .into_iter()
         .filter(|e| e.seq >= window_start && e.seq < lo)
+        // Quarantined entries (policy violations stamped on replay, ADR
+        // 006) are preserved for audit but never shown to the model: the
+        // decoder's context is the trusted conversation.
+        .filter(|e| e.disposition != crate::reconcile::DISPOSITION_QUARANTINE)
         .map(|e| context_turn(&e))
         .collect();
 
@@ -675,6 +679,35 @@ mod tests {
         let input2 = build_decoder_input(&store, &conflict, 2).await.unwrap();
         let verdict2 = StubDecoder.decode(input2).await.unwrap();
         assert_eq!(verdict, verdict2);
+    }
+
+    #[tokio::test]
+    async fn quarantined_entries_are_excluded_from_decoder_context() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store.grant_lease(&test_lease("l1", "s1", "h")).unwrap();
+        store
+            .insert_entry_raw(&msg_entry("u1", 1, "set the theme please"))
+            .unwrap();
+        // A replayed entry quarantined by policy re-evaluation (ADR 006):
+        // preserved in the log for audit, excluded from decoder context.
+        let mut quarantined = msg_entry("q1", 2, "denied tool output");
+        quarantined.disposition = crate::reconcile::DISPOSITION_QUARANTINE.to_string();
+        store.insert_entry_raw(&quarantined).unwrap();
+        store
+            .insert_entry_raw(&msg_entry("u3", 3, "window entry three"))
+            .unwrap();
+        let a = tool_entry("a", 4, "set_config", "ui.theme", &[("value", "dark")]);
+        let b = tool_entry("b", 5, "set_config", "ui.theme", &[("value", "light")]);
+        store.insert_entry_raw(&a).unwrap();
+        store.insert_entry_raw(&b).unwrap();
+
+        let StructuralVerdict::Conflict(conflict) = detect_pair(&a, &b) else {
+            panic!("expected structural conflict");
+        };
+        let input = build_decoder_input(&store, &conflict, 10).await.unwrap();
+        let ids: Vec<&str> = input.context.iter().map(|t| t.entry_id.as_str()).collect();
+        assert_eq!(ids, ["u1", "u3"], "quarantined entry must not appear");
     }
 
     #[tokio::test]

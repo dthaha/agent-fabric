@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use thiserror::Error;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionMeta, SessionState};
 use fabric_types::lease::{Lease, LeaseState};
@@ -38,6 +38,8 @@ pub enum StoreError {
     LeaseExpired(String),
     #[error("invalid lease state transition: {0}")]
     InvalidTransition(String),
+    #[error("ttl_ms must be positive, got {0}")]
+    InvalidTtl(i64),
     #[error("sequence conflict at seq {seq}: local entry {local} vs remote entry {remote}")]
     SeqConflict {
         seq: u64,
@@ -188,16 +190,17 @@ impl SqliteContextStore {
              FROM sessions WHERE state = ?1 ORDER BY created_at_ms ASC",
         )?;
         let rows = stmt.query_map(params![SessionState::Active as i32], |row| {
+            let session_id: String = row.get(0)?;
             let labels_json: String = row.get(7)?;
             Ok(SessionMeta {
-                session_id: row.get(0)?,
+                session_id: session_id.clone(),
                 soul_id: row.get(1)?,
                 user_id: row.get(2)?,
                 state: row.get(3)?,
                 active_lease: row.get(4)?,
                 created_at: Some(ms_to_timestamp(row.get(5)?)),
                 last_activity: Some(ms_to_timestamp(row.get(6)?)),
-                labels: serde_json::from_str(&labels_json).unwrap_or_default(),
+                labels: parse_labels(&session_id, &labels_json),
                 org_id: row.get(8)?,
             })
         })?;
@@ -317,6 +320,9 @@ impl SqliteContextStore {
         locus: Locus,
         ttl_ms: i64,
     ) -> Result<Lease> {
+        if ttl_ms <= 0 {
+            return Err(StoreError::InvalidTtl(ttl_ms));
+        }
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let lease = acquire_lease_conn(&tx, session_id, holder_id, locus, ttl_ms)?;
@@ -566,9 +572,10 @@ impl SqliteContextStore {
         lease_conn(&self.conn(), lease_id)
     }
 
-    /// The session's ACTIVE lease, or the most recently expired one that has
-    /// not yet been superseded (an expired lease blocks new writers until a
-    /// handoff or re-grant occurs).
+    /// The session's most recently granted lease in the ACTIVE state, if
+    /// any. Note the lease may be past its expiry (a crashed holder's lease
+    /// stays ACTIVE until superseded): callers that need liveness must
+    /// check `expires_at` themselves ([`acquire_lease_conn`] does).
     pub fn active_lease(&self, session_id: &str) -> Result<Option<Lease>> {
         active_lease_conn(&self.conn(), session_id)
     }
@@ -789,7 +796,7 @@ fn session_conn(conn: &Connection, session_id: &str) -> Result<SessionMeta> {
                 active_lease: row.get(4)?,
                 created_at: Some(ms_to_timestamp(row.get(5)?)),
                 last_activity: Some(ms_to_timestamp(row.get(6)?)),
-                labels: serde_json::from_str(&labels_json).unwrap_or_default(),
+                labels: parse_labels(session_id, &labels_json),
                 org_id: row.get(8)?,
             })
         },
@@ -976,53 +983,65 @@ pub(crate) fn session_state_name(state: i32) -> String {
         .unwrap_or_else(|_| format!("UNKNOWN({state})"))
 }
 
-/// Additive schema migrations for stores created by older builds. New
-/// columns are added to schema.sql's CREATE TABLE for fresh stores; here we
-/// only backfill columns that predate the current schema.
+/// Additive schema migrations for stores created by older builds: each
+/// entry is (table, column, DDL to add the column). This table is the
+/// whitelist — no runtime-constructed SQL identifiers ever reach the
+/// migration path.
+const COLUMN_MIGRATIONS: &[(&str, &str, &str)] = &[
+    (
+        "sessions",
+        "org_id",
+        "ALTER TABLE sessions ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "leases",
+        "granted_by",
+        "ALTER TABLE leases ADD COLUMN granted_by TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "leases",
+        "preempted_by",
+        "ALTER TABLE leases ADD COLUMN preempted_by TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "context_entries",
+        "disposition",
+        "ALTER TABLE context_entries ADD COLUMN disposition TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "context_entries",
+        "received_at_ms",
+        "ALTER TABLE context_entries ADD COLUMN received_at_ms INTEGER",
+    ),
+];
+
+/// Run [`COLUMN_MIGRATIONS`]: add each missing column. Table/column names
+/// are bound parameters in the existence probe; the DDL strings are the
+/// static whitelist above.
 fn migrate(conn: &Connection) -> Result<()> {
-    let has_org_id: bool = conn
-        .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'org_id'")?
-        .exists([])?;
-    if !has_org_id {
-        conn.execute(
-            "ALTER TABLE sessions ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
-            [],
-        )?;
-    }
-    for column in ["granted_by", "preempted_by"] {
+    for (table, column, ddl) in COLUMN_MIGRATIONS {
         let exists: bool = conn
-            .prepare(&format!(
-                "SELECT 1 FROM pragma_table_info('leases') WHERE name = '{column}'"
-            ))?
-            .exists([])?;
+            .prepare("SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2")?
+            .exists(params![table, column])?;
         if !exists {
-            conn.execute(
-                &format!("ALTER TABLE leases ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"),
-                [],
-            )?;
+            conn.execute_batch(ddl)?;
         }
     }
-    let has_disposition: bool = conn
-        .prepare("SELECT 1 FROM pragma_table_info('context_entries') WHERE name = 'disposition'")?
-        .exists([])?;
-    if !has_disposition {
-        conn.execute(
-            "ALTER TABLE context_entries ADD COLUMN disposition TEXT NOT NULL DEFAULT ''",
-            [],
-        )?;
-    }
-    let has_received_at: bool = conn
-        .prepare(
-            "SELECT 1 FROM pragma_table_info('context_entries') WHERE name = 'received_at_ms'",
-        )?
-        .exists([])?;
-    if !has_received_at {
-        conn.execute(
-            "ALTER TABLE context_entries ADD COLUMN received_at_ms INTEGER",
-            [],
-        )?;
-    }
     Ok(())
+}
+
+/// Parse a session row's labels JSON. Corrupt labels (should never happen —
+/// only the store writes them) degrade to empty with a warning rather than
+/// failing the whole read.
+fn parse_labels(session_id: &str, labels_json: &str) -> std::collections::HashMap<String, String> {
+    serde_json::from_str(labels_json).unwrap_or_else(|e| {
+        warn!(
+            session = session_id,
+            error = %e,
+            "corrupt labels JSON on session row; using empty labels"
+        );
+        std::collections::HashMap::new()
+    })
 }
 
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextEntry> {
@@ -1188,20 +1207,61 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn acquire_rejects_non_positive_ttl() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        for ttl in [0, -1, -60_000] {
+            let err = store
+                .acquire_lease("s1", "endpoint-1", Locus::Endpoint, ttl)
+                .unwrap_err();
+            assert!(
+                matches!(err, StoreError::InvalidTtl(t) if t == ttl),
+                "ttl {ttl}: {err}"
+            );
+        }
+        assert!(store.active_lease("s1").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn concurrent_acquire_grants_exactly_one_lease() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+
+        // Two racing acquirers on the same session: exactly one wins; the
+        // loser sees a conflict. The transactional check-then-insert (and
+        // the idx_one_active_lease backstop) make a double grant impossible.
+        let spawn = |holder: &'static str| {
+            let store = store.clone();
+            tokio::task::spawn_blocking(move || {
+                store.acquire_lease("s1", holder, Locus::Endpoint, 30_000)
+            })
+        };
+        let (a, b) = tokio::join!(spawn("holder-a"), spawn("holder-b"));
+        let results = [a.unwrap(), b.unwrap()];
+        let granted = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(granted, 1, "exactly one racer may hold the lease");
+        assert!(results
+            .iter()
+            .any(|r| matches!(r, Err(StoreError::LeaseConflict(_)))));
+        assert!(store.active_lease("s1").unwrap().is_some());
+    }
+
+    #[test]
     fn acquire_after_holder_crash_succeeds_once_expired() {
         let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
         // Holder crashes mid-turn without releasing; TTL is the safety net.
-        let crashed = store
-            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 0)
-            .unwrap();
+        // (Granted directly with a past expiry: acquire rejects ttl <= 0.)
+        let mut crashed_lease = test_lease("l-crashed", "s1", "endpoint-1");
+        crashed_lease.expires_at = Some(ms_to_timestamp(now_ms() - 1));
+        store.grant_lease(&crashed_lease).unwrap();
 
         let lease = store
             .acquire_lease("s1", "server-1", Locus::Server, 30_000)
             .unwrap();
         assert_eq!(lease.holder_id, "server-1");
         assert_eq!(
-            store.lease(&crashed.lease_id).unwrap().state,
+            store.lease(&crashed_lease.lease_id).unwrap().state,
             LeaseState::Expired as i32
         );
         let mut e1 = test_entry("e1", "s1", "server-1");
@@ -1795,10 +1855,11 @@ pub(crate) mod tests {
     fn renew_lease_rejects_expired() {
         let store = SqliteContextStore::open_in_memory().unwrap();
         store.create_session(&test_session("s1")).unwrap();
-        // TTL 0 expires immediately.
-        let lease = store
-            .acquire_lease("s1", "endpoint-1", Locus::Endpoint, 0)
-            .unwrap();
+        // A lease past its expiry (granted directly with a past expiry:
+        // acquire rejects ttl <= 0) cannot be renewed.
+        let mut lease = test_lease("l1", "s1", "endpoint-1");
+        lease.expires_at = Some(ms_to_timestamp(now_ms() - 1));
+        store.grant_lease(&lease).unwrap();
         let err = store
             .renew_lease(&lease.lease_id, "endpoint-1", 60_000)
             .unwrap_err();

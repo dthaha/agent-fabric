@@ -46,6 +46,15 @@ pub struct LeaseClient {
 
 impl LeaseClient {
     pub fn new(base_url: &str, holder_id: &str, user_id: &str, org_id: &str) -> Self {
+        if base_url.starts_with("http://") {
+            // Dev mode needs plaintext http (localhost control planes); in
+            // production the lease API carries identity headers and must be
+            // TLS-terminated.
+            warn!(
+                server_url = base_url,
+                "lease traffic is plaintext HTTP — set FABRIC_SERVER_URL to https:// for production"
+            );
+        }
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
@@ -223,7 +232,7 @@ pub async fn ensure_lease(state: &Arc<DaemonState>, session_id: &str) {
         Acquire { replay_after: bool },
     }
     let action = {
-        let cache = state.leases.lock().expect("lease cache poisoned");
+        let cache = state.leases.lock().unwrap_or_else(|e| e.into_inner());
         match cache.get(session_id) {
             Some(c) if c.fresh() => Action::None,
             Some(c) if c.due_for_renewal() => Action::Renew(
@@ -247,7 +256,7 @@ pub async fn ensure_lease(state: &Arc<DaemonState>, session_id: &str) {
         Action::Renew(lease_id) => match client.renew(&lease_id, DEFAULT_TTL_MS).await {
             Ok(lease) => {
                 info!(session = session_id, lease = %lease.lease_id, "lease renewed");
-                let mut cache = state.leases.lock().expect("lease cache poisoned");
+                let mut cache = state.leases.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(c) = cache.get_mut(session_id) {
                     c.lease = Some(lease);
                     c.fetched_at = Instant::now();
@@ -279,7 +288,7 @@ async fn acquire_and_cache(
                 "server lease acquired"
             );
             {
-                let mut cache = state.leases.lock().expect("lease cache poisoned");
+                let mut cache = state.leases.lock().unwrap_or_else(|e| e.into_inner());
                 let synced_seq = cache.get(session_id).map(|c| c.synced_seq).unwrap_or(0);
                 cache.insert(
                     session_id.to_string(),
@@ -299,7 +308,7 @@ async fn acquire_and_cache(
             // Offline path: mark the lease wanted and keep going. Local
             // op-log commits are unaffected.
             warn!(session = session_id, error = %e, "server unreachable; lease marked wanted");
-            let mut cache = state.leases.lock().expect("lease cache poisoned");
+            let mut cache = state.leases.lock().unwrap_or_else(|e| e.into_inner());
             cache
                 .entry(session_id.to_string())
                 .or_insert(CachedLease {
@@ -318,10 +327,10 @@ async fn acquire_and_cache(
 /// merge server-side; conflicts are reported, never fatal here.
 async fn replay_local_log(state: &Arc<DaemonState>, client: &LeaseClient, session_id: &str) {
     let (entries, head) = {
-        let cache = state.leases.lock().expect("lease cache poisoned");
+        let cache = state.leases.lock().unwrap_or_else(|e| e.into_inner());
         let synced = cache.get(session_id).map(|c| c.synced_seq).unwrap_or(0);
         drop(cache);
-        let store = state.store.lock().expect("store lock poisoned");
+        let store = state.store.lock().unwrap_or_else(|e| e.into_inner());
         match store.entries_since(session_id, synced) {
             Ok(entries) => match store.head_seq(session_id) {
                 Ok(head) => (entries, head),
@@ -348,14 +357,14 @@ async fn replay_local_log(state: &Arc<DaemonState>, client: &LeaseClient, sessio
                 conflicts = report.conflicts.len(),
                 "local op-log replayed to server"
             );
-            let mut cache = state.leases.lock().expect("lease cache poisoned");
+            let mut cache = state.leases.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(c) = cache.get_mut(session_id) {
                 c.synced_seq = head;
             }
         }
         Err(e) => {
             warn!(session = session_id, error = %e, "op-log replay failed; will retry");
-            let mut cache = state.leases.lock().expect("lease cache poisoned");
+            let mut cache = state.leases.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(c) = cache.get_mut(session_id) {
                 c.wanted = true;
             }
@@ -376,7 +385,7 @@ pub async fn lease_maintenance(state: Arc<DaemonState>, shutdown: CancellationTo
             _ = tick.tick() => {}
         }
         let sessions: Vec<String> = {
-            let cache = state.leases.lock().expect("lease cache poisoned");
+            let cache = state.leases.lock().unwrap_or_else(|e| e.into_inner());
             cache
                 .iter()
                 .filter(|(_, c)| c.wanted || c.due_for_renewal())

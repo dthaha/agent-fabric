@@ -13,8 +13,9 @@
 //!   [`StructuralDisposition::Escalate`].
 //!
 //! The detector performs no I/O, no inference, and no clock reads; ordering
-//! derives only from the entries' own `(created_at, entry_id)`, matching the
-//! reconcile merge order.
+//! derives only from the entries' own `(received_at, entry_id)` — with
+//! `created_at` as the fallback for entries predating the field — matching
+//! the reconcile merge order (ADR 006).
 
 use fabric_types::conflict::{ConflictRelation, ConflictVerdict, SharedEntity};
 use fabric_types::context::{ContextEntry, EntryKind, ToolCall};
@@ -56,7 +57,7 @@ pub struct StructuralConflict {
     pub relation: ConflictRelation,
     pub disposition: StructuralDisposition,
     /// Set when disposition is `LastWriteWins`: the surviving entry under the
-    /// deterministic `(created_at, entry_id)` order.
+    /// deterministic `(received_at, entry_id)` order (`created_at` fallback).
     pub lww_winner_entry_id: Option<String>,
 }
 
@@ -96,10 +97,17 @@ fn as_tool_call(entry: &ContextEntry) -> Option<ToolCall> {
     tool_call::decode(&entry.payload).ok()
 }
 
-/// Deterministic last-write-wins winner: later `(created_at, entry_id)`
-/// writes last and wins. Mirrors reconcile's merge ordering.
+/// Deterministic last-write-wins winner: later `(received_at, entry_id)`
+/// writes last and wins, with `created_at` as the fallback for entries
+/// predating the field. Mirrors reconcile's merge ordering (ADR 006), so
+/// the structural-detector winner always matches the merge winner.
 fn lww_winner<'a>(a: &'a ContextEntry, b: &'a ContextEntry) -> &'a ContextEntry {
-    let key = |e: &ContextEntry| (timestamp_to_ms(e.created_at.as_ref()), e.entry_id.clone());
+    let key = |e: &ContextEntry| {
+        (
+            timestamp_to_ms(e.received_at.as_ref().or(e.created_at.as_ref())),
+            e.entry_id.clone(),
+        )
+    };
     if key(a) >= key(b) {
         a
     } else {
@@ -261,7 +269,8 @@ mod tests {
 
     #[test]
     fn idempotent_pair_resolves_lww() {
-        // Later (created_at, entry_id) writes last and wins.
+        // Later (received_at, entry_id) writes last and wins; created_at is
+        // the fallback when received_at is unset.
         let a = tool_entry("a", "cache_put", "k1", &[("v", "1")], "key-a", 1000);
         let b = tool_entry("b", "cache_put", "k1", &[("v", "2")], "key-b", 2000);
         let StructuralVerdict::Conflict(c) = detect_pair(&a, &b) else {
@@ -274,6 +283,28 @@ mod tests {
             panic!("expected conflict");
         };
         assert_eq!(c2.lww_winner_entry_id.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn lww_orders_by_received_at_before_created_at() {
+        // Same created_at, different received_at: the later server-stamped
+        // received_at wins (ADR 006 — created_at is an untrusted claim).
+        let mut a = tool_entry("a", "cache_put", "k1", &[("v", "1")], "key-a", 1000);
+        a.received_at = Some(ms_to_timestamp(500));
+        let mut b = tool_entry("b", "cache_put", "k1", &[("v", "2")], "key-b", 1000);
+        b.received_at = Some(ms_to_timestamp(900));
+        let StructuralVerdict::Conflict(c) = detect_pair(&a, &b) else {
+            panic!("expected conflict");
+        };
+        assert_eq!(c.lww_winner_entry_id.as_deref(), Some("b"));
+
+        // A backdated created_at cannot override received_at ordering.
+        let mut c_entry = tool_entry("c", "cache_put", "k1", &[("v", "3")], "key-c", 1);
+        c_entry.received_at = Some(ms_to_timestamp(950));
+        let StructuralVerdict::Conflict(c2) = detect_pair(&b, &c_entry) else {
+            panic!("expected conflict");
+        };
+        assert_eq!(c2.lww_winner_entry_id.as_deref(), Some("c"));
     }
 
     #[test]
