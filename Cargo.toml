@@ -61,3 +61,5 @@ chrono = { version = "0.4", features = ["serde"] }
 http = "1"
 hyper = { version = "1", features = ["full"] }
 http-body = "1"
+plist = "1"
+quick-xml = { version = "0.37", features = ["serialize"] }

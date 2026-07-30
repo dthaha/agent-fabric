@@ -1,22 +1,24 @@
-//! Endpoint MDM ingest: parses Intune/Jamf policy packs delivered to the
-//! device and loads them as the endpoint policy ceiling. The endpoint can
-//! tighten this ceiling locally but never loosen it.
+//! Endpoint MDM ingest: parses policy packs delivered to the device in
+//! MDM-native formats and loads them as the endpoint policy ceiling. The
+//! endpoint can tighten this ceiling locally but never loosen it.
 //!
-//! Wire format: JSON. Either a bare `EndpointPolicy` document, or the
-//! MDM-delivered wrapper:
+//! Formats (ADR 005): Jamf plist Configuration Profiles (macOS), Intune
+//! OMA-URI XML (Windows), and the generic `fabric-mdm/v1` JSON wrapper or
+//! a bare `EndpointPolicy` JSON document (Linux / generic MDM). The format
+//! is auto-detected from the payload bytes.
 //!
-//! ```json
-//! {"format":"fabric-mdm/v1","policy":{...},"signature":"..."}
-//! ```
-//!
-//! The wrapper `signature` is a placeholder for future code-signing
-//! verification and is currently ignored.
+//! Per ADR 005 there is no application-layer signing: the MDM channel is
+//! the trust anchor. JSON documents carrying a legacy `signature` key are
+//! still accepted; the key is ignored.
 
 use std::path::Path;
 
 use fabric_types::policy::EndpointPolicy;
 use serde::Deserialize;
 use thiserror::Error;
+
+mod oma_uri;
+mod plist_parser;
 
 /// Format marker prefix carried by MDM wrapper documents.
 pub const PACK_FORMAT_PREFIX: &str = "fabric-mdm/";
@@ -28,8 +30,12 @@ pub enum MdmError {
         path: String,
         source: std::io::Error,
     },
-    #[error("parsing policy pack: {0}")]
+    #[error("parsing JSON policy pack: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("parsing plist policy pack: {0}")]
+    Plist(#[from] plist::Error),
+    #[error("parsing OMA-URI policy pack: {0}")]
+    OmaUri(#[from] quick_xml::DeError),
     #[error("unsupported policy pack format: {0}")]
     UnsupportedFormat(String),
     #[error("invalid policy pack: {0}")]
@@ -38,15 +44,22 @@ pub enum MdmError {
 
 pub type Result<T> = std::result::Result<T, MdmError>;
 
+/// Policy pack wire format, per ADR 005.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackFormat {
+    /// `fabric-mdm/v1` JSON wrapper or bare `EndpointPolicy` JSON.
+    Json,
+    /// Jamf Configuration Profile plist (macOS).
+    Plist,
+    /// Intune OMA-URI `FabricPolicy` XML (Windows).
+    OmaUri,
+}
+
 /// MDM wrapper document. The `format` marker is checked on the raw value
 /// before this struct is deserialized, so only the payload is modeled here.
 #[derive(Debug, Deserialize)]
 struct PolicyPack {
     policy: serde_json::Value,
-    /// Placeholder for future code-signing verification. Ignored for now.
-    #[serde(default)]
-    #[allow(dead_code)]
-    signature: Option<String>,
 }
 
 /// True when `bytes` look like an MDM wrapper document (a JSON object with
@@ -58,11 +71,53 @@ pub fn is_policy_pack(bytes: &[u8]) -> bool {
         .is_some_and(|f| f.starts_with(PACK_FORMAT_PREFIX))
 }
 
-/// Parse an MDM policy pack from JSON bytes. Accepts the wrapper format
-/// (`fabric-mdm/v1`) or a bare `EndpointPolicy` document. The resulting
+/// Detect the wire format of a policy pack from its leading bytes: XML
+/// documents containing a `<plist` element are Jamf plists, other XML
+/// documents are treated as Intune OMA-URI, and everything else is JSON.
+pub fn detect_format(bytes: &[u8]) -> PackFormat {
+    let text = std::str::from_utf8(bytes).unwrap_or("");
+    let trimmed = text.trim_start_matches('\u{feff}').trim_start();
+    if trimmed.starts_with('<') {
+        let head = &trimmed[..trimmed.len().min(4096)];
+        if head.contains("<plist") {
+            PackFormat::Plist
+        } else {
+            PackFormat::OmaUri
+        }
+    } else {
+        PackFormat::Json
+    }
+}
+
+/// Parse an MDM policy pack using an explicit wire format. The resulting
 /// policy is validated: `policy_id`, `version`, and `org_id` must all be
 /// non-empty.
+pub fn parse_with_format(bytes: &[u8], format: PackFormat) -> Result<EndpointPolicy> {
+    let policy = match format {
+        PackFormat::Json => parse_json(bytes)?,
+        PackFormat::Plist => plist_parser::parse(bytes)?,
+        PackFormat::OmaUri => oma_uri::parse(bytes)?,
+    };
+    validate(&policy)?;
+    Ok(policy)
+}
+
+/// Parse an MDM policy pack, auto-detecting the wire format from the
+/// payload bytes. See [`parse_with_format`].
 pub fn parse_policy_pack(bytes: &[u8]) -> Result<EndpointPolicy> {
+    parse_with_format(bytes, detect_format(bytes))
+}
+
+/// Read a policy pack from `path`, parse it, and validate it.
+pub fn load_mdm_policy(path: &Path) -> Result<EndpointPolicy> {
+    let bytes = std::fs::read(path).map_err(|source| MdmError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    parse_policy_pack(&bytes)
+}
+
+fn parse_json(bytes: &[u8]) -> Result<EndpointPolicy> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     let policy_value = if let Some(format) = value.get("format").and_then(|f| f.as_str()) {
         if !format.starts_with(PACK_FORMAT_PREFIX) {
@@ -73,18 +128,7 @@ pub fn parse_policy_pack(bytes: &[u8]) -> Result<EndpointPolicy> {
     } else {
         value
     };
-    let policy: EndpointPolicy = serde_json::from_value(policy_value)?;
-    validate(&policy)?;
-    Ok(policy)
-}
-
-/// Read a policy pack from `path`, parse it, and validate it.
-pub fn load_mdm_policy(path: &Path) -> Result<EndpointPolicy> {
-    let bytes = std::fs::read(path).map_err(|source| MdmError::Io {
-        path: path.display().to_string(),
-        source,
-    })?;
-    parse_policy_pack(&bytes)
+    Ok(serde_json::from_value(policy_value)?)
 }
 
 fn validate(policy: &EndpointPolicy) -> Result<()> {
@@ -120,7 +164,6 @@ mod tests {
         let wrapper = serde_json::json!({
             "format": "fabric-mdm/v1",
             "policy": bare_policy_json(),
-            "signature": "deadbeef",
         });
         let bytes = serde_json::to_vec(&wrapper).unwrap();
         assert!(is_policy_pack(&bytes));
@@ -130,6 +173,20 @@ mod tests {
         assert_eq!(policy.version, "v1");
         assert_eq!(policy.org_id, "org-1");
         assert_eq!(policy.tool_rules.len(), 1);
+    }
+
+    #[test]
+    fn legacy_signature_key_is_ignored() {
+        let wrapper = serde_json::json!({
+            "format": "fabric-mdm/v1",
+            "policy": bare_policy_json(),
+            "signature": "deadbeef",
+        });
+        let bytes = serde_json::to_vec(&wrapper).unwrap();
+        assert!(is_policy_pack(&bytes));
+
+        let policy = parse_policy_pack(&bytes).unwrap();
+        assert_eq!(policy.policy_id, "ep-1");
     }
 
     #[test]
@@ -189,5 +246,67 @@ mod tests {
             load_mdm_policy(Path::new("/nonexistent/pack.json")),
             Err(MdmError::Io { .. })
         ));
+    }
+
+    #[test]
+    fn detects_json_format() {
+        assert_eq!(detect_format(b"{\"policyId\":\"ep-1\"}"), PackFormat::Json);
+        assert_eq!(detect_format(b"  \n{\"a\":1}"), PackFormat::Json);
+    }
+
+    #[test]
+    fn detects_plist_format() {
+        let bytes = b"<?xml version=\"1.0\"?>\n<plist version=\"1.0\"><dict></dict></plist>";
+        assert_eq!(detect_format(bytes), PackFormat::Plist);
+    }
+
+    #[test]
+    fn detects_oma_uri_format() {
+        let bytes = b"<?xml version=\"1.0\"?>\n<FabricPolicy></FabricPolicy>";
+        assert_eq!(detect_format(bytes), PackFormat::OmaUri);
+        assert_eq!(
+            detect_format(b"<FabricPolicy></FabricPolicy>"),
+            PackFormat::OmaUri
+        );
+    }
+
+    #[test]
+    fn auto_detects_plist_pack() {
+        let bytes = br#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>PolicyID</key>
+    <string>ep-mac</string>
+    <key>Version</key>
+    <string>v1</string>
+    <key>OrgID</key>
+    <string>org-1</string>
+</dict>
+</plist>
+"#;
+        assert!(!is_policy_pack(bytes));
+        let policy = parse_policy_pack(bytes).unwrap();
+        assert_eq!(policy.policy_id, "ep-mac");
+    }
+
+    #[test]
+    fn auto_detects_oma_uri_pack() {
+        let bytes = br#"<FabricPolicy>
+  <PolicyID>ep-win</PolicyID>
+  <Version>v1</Version>
+  <OrgID>org-1</OrgID>
+</FabricPolicy>"#;
+        let policy = parse_policy_pack(bytes).unwrap();
+        assert_eq!(policy.policy_id, "ep-win");
+    }
+
+    #[test]
+    fn explicit_format_selection() {
+        let bytes = serde_json::to_vec(&bare_policy_json()).unwrap();
+        let policy = parse_with_format(&bytes, PackFormat::Json).unwrap();
+        assert_eq!(policy.policy_id, "ep-1");
+
+        let err = parse_with_format(&bytes, PackFormat::OmaUri).unwrap_err();
+        assert!(matches!(err, MdmError::OmaUri(_)));
     }
 }

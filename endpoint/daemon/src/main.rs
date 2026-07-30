@@ -160,18 +160,13 @@ fn load_policy(state: &DaemonState) {
     }
 }
 
-/// Read the endpoint policy document: MDM wrapper packs (detected by the
-/// `fabric-mdm/` format marker) go through the MDM ingest layer, everything
-/// else is treated as a bare `EndpointPolicy` JSON document.
+/// Read the endpoint policy document. The MDM ingest layer auto-detects
+/// the wire format (ADR 005): Jamf plist, Intune OMA-URI XML, the
+/// `fabric-mdm/v1` JSON wrapper, or a bare `EndpointPolicy` JSON document.
 fn read_endpoint_policy(path: &std::path::Path) -> Result<fabric_types::policy::EndpointPolicy> {
     let bytes =
         std::fs::read(path).with_context(|| format!("reading policy {}", path.display()))?;
-    let policy = if fabric_endpoint_mdm::is_policy_pack(&bytes) {
-        fabric_endpoint_mdm::parse_policy_pack(&bytes)
-            .with_context(|| format!("parsing MDM policy pack {}", path.display()))?
-    } else {
-        serde_json::from_slice(&bytes)
-            .with_context(|| format!("parsing endpoint policy {}", path.display()))?
-    };
+    let policy = fabric_endpoint_mdm::parse_policy_pack(&bytes)
+        .with_context(|| format!("parsing endpoint policy {}", path.display()))?;
     Ok(policy)
 }
