@@ -88,6 +88,174 @@ The daemon parses whichever format the platform delivers. The
 `fabric-mdm/v1` JSON wrapper remains as the generic/Linux format. The
 `signature` field is removed from the schema.
 
+### MDM key reference (customer documentation)
+
+These are the exact keys IT admins configure in their MDM. The daemon
+reads them from the platform-native location on disk.
+
+#### macOS (Jamf Configuration Profile)
+
+Payload domain: `tech.fabric.agent.policy`
+
+| Key | Type | Required | Description |
+|---|---|---|---|
+| `PolicyID` | String | Yes | Unique policy identifier |
+| `Version` | String | Yes | Policy version (semver) |
+| `OrgID` | String | Yes | Organization identifier |
+| `KillSwitch` | Boolean | No | Emergency stop. `true` = daemon halts all agent activity. Default: `false` |
+| `MaxRetentionHours` | Integer | No | Max hours context entries are retained. `0` = unlimited. Default: `0` |
+| `DataRules` | Array of Dict | No | Per-data-class rules (see below) |
+| `ToolRules` | Array of Dict | No | Per-tool access rules (see below) |
+| `ModelRules` | Array of Dict | No | Per-model access rules (see below) |
+| `CuaEnabled` | Boolean | No | Allow computer-use actuator. Default: `false` |
+| `CuaMaxScreenArea` | Real | No | Max fraction of screen CUA may interact with (0.0–1.0). Default: `1.0` |
+| `CuaRequireConfirmation` | Boolean | No | Require user confirmation before CUA actions. Default: `true` |
+| `CuaBlockedApps` | Array of String | No | Bundle IDs CUA must never touch (e.g. `com.apple.Terminal`) |
+| `DlpPatterns` | Array of Dict | No | DLP regex patterns (see below) |
+| `SafetyEnabled` | Boolean | No | Enable content safety classification. Default: `true` |
+| `SafetyFailMode` | String | No | `open` or `closed` (behavior when safety model unreachable). Default: `closed` |
+| `SafetyRules` | Array of Dict | No | Per-category safety rules (see below) |
+
+**DataRules dict keys:**
+
+| Key | Type | Description |
+|---|---|---|
+| `DataClass` | String | Data classification label (e.g. `pii`, `financial`, `public`) |
+| `MayLeaveDevice` | Boolean | Whether this data class may be sent to server-side inference |
+| `RequiresRedaction` | Boolean | Whether data must be redacted before leaving device |
+| `AllowedDestinations` | Array of String | Explicit allowlist of destination hostnames (empty = any if `MayLeaveDevice` is true) |
+
+**ToolRules dict keys:**
+
+| Key | Type | Description |
+|---|---|---|
+| `ToolPattern` | String | Glob pattern matching tool names (e.g. `file.*`, `shell.exec`) |
+| `Action` | String | `allow`, `deny`, or `confirm` (require user confirmation) |
+| `MaxCallsPerSession` | Integer | Rate limit per session. `0` = unlimited |
+
+**ModelRules dict keys:**
+
+| Key | Type | Description |
+|---|---|---|
+| `ModelPattern` | String | Glob pattern matching model identifiers (e.g. `nvidia/*`, `local/*`) |
+| `Action` | String | `allow` or `deny` |
+| `MaxTokensPerCall` | Integer | Per-call token cap. `0` = unlimited |
+
+**DlpPatterns dict keys:**
+
+| Key | Type | Description |
+|---|---|---|
+| `Name` | String | Pattern identifier (e.g. `us-ssn`) |
+| `Regex` | String | Regular expression to match |
+| `Action` | String | `redact`, `block`, or `warn` |
+
+**SafetyRules dict keys:**
+
+| Key | Type | Description |
+|---|---|---|
+| `Category` | String | Safety category (e.g. `violence`, `sexual`, `pii`, `injection`) |
+| `Action` | String | `block`, `warn`, or `allow` |
+
+#### Windows (Intune OMA-URI)
+
+CSP path: `./Vendor/MSFT/Policy/Config/Fabric~Agent~Policy/`
+
+| OMA-URI suffix | Type | Required | Maps to |
+|---|---|---|---|
+| `PolicyID` | String | Yes | `policy_id` |
+| `Version` | String | Yes | `version` |
+| `OrgID` | String | Yes | `org_id` |
+| `KillSwitch` | Integer (0/1) | No | `kill_switch` |
+| `MaxRetentionHours` | Integer | No | `max_retention_hours` |
+| `CuaEnabled` | Integer (0/1) | No | `cua.enabled` |
+| `CuaMaxScreenArea` | String (decimal) | No | `cua.max_screen_area` |
+| `CuaRequireConfirmation` | Integer (0/1) | No | `cua.require_confirmation` |
+| `CuaBlockedApps` | String (semicolon-delimited) | No | `cua.blocked_apps` |
+| `SafetyEnabled` | Integer (0/1) | No | `safety.enabled` |
+| `SafetyFailMode` | String | No | `safety.fail_mode` |
+| `DataRules` | String (JSON array) | No | `data_rules` |
+| `ToolRules` | String (JSON array) | No | `tool_rules` |
+| `ModelRules` | String (JSON array) | No | `model_rules` |
+| `DlpPatterns` | String (JSON array) | No | `dlp_patterns` |
+| `SafetyRules` | String (JSON array) | No | `safety.rules` |
+
+Note: Intune OMA-URI does not support native nested arrays. Complex
+rules (DataRules, ToolRules, etc.) are delivered as JSON-encoded strings
+within a single OMA-URI value. The daemon parses the JSON string into
+the corresponding proto structs.
+
+#### Generic / Linux (JSON file)
+
+File path: `/etc/fabric/policy.json` (or `FABRIC_POLICY_PATH` env)
+
+Format: the existing `fabric-mdm/v1` JSON wrapper (minus `signature`):
+
+```json
+{
+  "format": "fabric-mdm/v1",
+  "policy": {
+    "policy_id": "org-acme-2026-07",
+    "version": "1.2.0",
+    "org_id": "acme-corp",
+    "kill_switch": false,
+    "max_retention_hours": 720,
+    "data_rules": [
+      {
+        "data_class": "pii",
+        "may_leave_device": false,
+        "requires_redaction": true,
+        "allowed_destinations": []
+      }
+    ],
+    "tool_rules": [
+      {
+        "tool_pattern": "shell.*",
+        "action": "confirm",
+        "max_calls_per_session": 50
+      }
+    ],
+    "model_rules": [
+      {
+        "model_pattern": "local/*",
+        "action": "allow",
+        "max_tokens_per_call": 0
+      }
+    ],
+    "cua": {
+      "enabled": true,
+      "max_screen_area": 0.8,
+      "require_confirmation": true,
+      "blocked_apps": ["com.apple.Terminal"]
+    },
+    "dlp_patterns": [
+      {
+        "name": "us-ssn",
+        "regex": "\\b\\d{3}-\\d{2}-\\d{4}\\b",
+        "action": "redact"
+      }
+    ],
+    "safety": {
+      "enabled": true,
+      "fail_mode": "closed",
+      "rules": [
+        { "category": "violence", "action": "block" },
+        { "category": "injection", "action": "block" }
+      ]
+    }
+  }
+}
+```
+
+#### Key naming convention
+
+- macOS plist: PascalCase (Apple convention)
+- Intune OMA-URI: PascalCase (Microsoft convention)
+- JSON: snake_case (proto/serde convention)
+
+The daemon normalizes all three to the internal `EndpointPolicy` proto
+struct. Admins configure in their platform's native convention; no
+cross-platform key translation required.
+
 ### What Fabric ships
 
 - **Pack generators**: `fabric-pack generate --format jamf|intune|generic`
