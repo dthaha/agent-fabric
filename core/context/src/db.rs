@@ -443,6 +443,8 @@ impl SqliteContextStore {
             policy_version: String::new(),
             locus: Locus::Unspecified as i32,
             created_at: Some(ms_to_timestamp(self.clock.tick())),
+            received_at: None,
+            disposition: String::new(),
         };
         self.insert_entry_raw(&event)?;
         Ok(lease)
@@ -666,6 +668,9 @@ impl SqliteContextStore {
         // insert_entry_raw — the replay/reconcile path — preserves the
         // original timestamp.
         entry.created_at = Some(ms_to_timestamp(self.clock.tick()));
+        // received_at is stamped on reconcile ingest by the receiving store,
+        // never by the writer (ADR 006); a direct local append has none.
+        entry.received_at = None;
         self.insert_entry_raw(entry)?;
         self.conn().execute(
             "UPDATE sessions SET last_activity_ms = ?1 WHERE session_id = ?2",
@@ -681,8 +686,8 @@ impl SqliteContextStore {
     pub(crate) fn insert_entry_raw(&self, entry: &ContextEntry) -> Result<()> {
         self.conn().execute(
             "INSERT INTO context_entries
-             (session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms, received_at_ms, disposition)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 entry.session_id,
                 entry.seq as i64,
@@ -693,6 +698,8 @@ impl SqliteContextStore {
                 entry.policy_version,
                 entry.locus,
                 timestamp_to_ms(entry.created_at.as_ref()),
+                entry.received_at.as_ref().map(|ts| timestamp_to_ms(Some(ts))),
+                entry.disposition,
             ],
         )?;
         Ok(())
@@ -701,7 +708,7 @@ impl SqliteContextStore {
     pub fn entry_by_id(&self, entry_id: &str) -> Result<Option<ContextEntry>> {
         self.conn()
             .query_row(
-                "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms
+                "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms, received_at_ms, disposition
                  FROM context_entries WHERE entry_id = ?1",
                 params![entry_id],
                 row_to_entry,
@@ -713,7 +720,7 @@ impl SqliteContextStore {
     pub fn entry_at_seq(&self, session_id: &str, seq: u64) -> Result<Option<ContextEntry>> {
         self.conn()
             .query_row(
-                "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms
+                "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms, received_at_ms, disposition
                  FROM context_entries WHERE session_id = ?1 AND seq = ?2",
                 params![session_id, seq as i64],
                 row_to_entry,
@@ -727,7 +734,7 @@ impl SqliteContextStore {
     pub fn entries_since(&self, session_id: &str, after_seq: u64) -> Result<Vec<ContextEntry>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms
+            "SELECT session_id, seq, entry_id, kind, payload, lease_holder, policy_version, locus, created_at_ms, received_at_ms, disposition
              FROM context_entries WHERE session_id = ?1 AND seq > ?2 ORDER BY seq ASC",
         )?;
         let rows = stmt.query_map(params![session_id, after_seq as i64], row_to_entry)?;
@@ -749,6 +756,19 @@ impl SqliteContextStore {
             .optional()?
             .flatten();
         Ok(seq.unwrap_or(0) as u64)
+    }
+
+    /// Set an entry's disposition (ADR 006). Reconcile marks policy-violating
+    /// replayed entries `QUARANTINE`; the entry is preserved, never dropped.
+    pub(crate) fn set_disposition(&self, entry_id: &str, disposition: &str) -> Result<()> {
+        let n = self.conn().execute(
+            "UPDATE context_entries SET disposition = ?1 WHERE entry_id = ?2",
+            params![disposition, entry_id],
+        )?;
+        if n == 0 {
+            return Err(StoreError::SessionNotFound(entry_id.to_string()));
+        }
+        Ok(())
     }
 
     /// Reassign the seq of an existing entry (conflict resolution moves the
@@ -797,6 +817,26 @@ fn migrate(conn: &Connection) -> Result<()> {
             )?;
         }
     }
+    let has_disposition: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('context_entries') WHERE name = 'disposition'")?
+        .exists([])?;
+    if !has_disposition {
+        conn.execute(
+            "ALTER TABLE context_entries ADD COLUMN disposition TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    let has_received_at: bool = conn
+        .prepare(
+            "SELECT 1 FROM pragma_table_info('context_entries') WHERE name = 'received_at_ms'",
+        )?
+        .exists([])?;
+    if !has_received_at {
+        conn.execute(
+            "ALTER TABLE context_entries ADD COLUMN received_at_ms INTEGER",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -811,6 +851,8 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextEntry> {
         policy_version: row.get(6)?,
         locus: row.get(7)?,
         created_at: Some(ms_to_timestamp(row.get(8)?)),
+        received_at: row.get::<_, Option<i64>>(9)?.map(ms_to_timestamp),
+        disposition: row.get(10)?,
     })
 }
 
@@ -859,6 +901,8 @@ pub(crate) mod tests {
             policy_version: "v1".into(),
             locus: Locus::Endpoint as i32,
             created_at: None,
+            received_at: None,
+            disposition: String::new(),
         }
     }
 
@@ -1472,6 +1516,8 @@ pub(crate) mod tests {
                 policy_version: String::new(),
                 locus: Locus::Unspecified as i32,
                 created_at: Some(ms_to_timestamp(now_ms())),
+                received_at: None,
+                disposition: String::new(),
             };
             store.insert_entry_raw(&event).unwrap();
         }
@@ -1572,6 +1618,42 @@ pub(crate) mod tests {
             .renew_lease(&lease.lease_id, "endpoint-1", 60_000)
             .unwrap_err();
         assert!(matches!(err, StoreError::LeaseExpired(_)));
+    }
+
+    #[test]
+    fn disposition_and_received_at_roundtrip() {
+        let store = SqliteContextStore::open_in_memory().unwrap();
+        store.create_session(&test_session("s1")).unwrap();
+        store
+            .grant_lease(&test_lease("l1", "s1", "endpoint-1"))
+            .unwrap();
+
+        // A replayed entry carries a server-stamped received_at.
+        let mut replayed = test_entry("e1", "s1", "endpoint-1");
+        replayed.seq = 1;
+        replayed.created_at = Some(ms_to_timestamp(1_000));
+        replayed.received_at = Some(ms_to_timestamp(2_000));
+        store.insert_entry_raw(&replayed).unwrap();
+
+        let stored = store.entry_by_id("e1").unwrap().unwrap();
+        assert_eq!(timestamp_to_ms(stored.received_at.as_ref()), 2_000);
+        assert_eq!(stored.disposition, "");
+
+        // Quarantine persists and reads back.
+        store.set_disposition("e1", "QUARANTINE").unwrap();
+        let stored = store.entry_by_id("e1").unwrap().unwrap();
+        assert_eq!(stored.disposition, "QUARANTINE");
+        assert!(matches!(
+            store.set_disposition("nope", "QUARANTINE"),
+            Err(StoreError::SessionNotFound(_))
+        ));
+
+        // A direct local append has no received_at.
+        let mut e2 = test_entry("e2", "s1", "endpoint-1");
+        e2.received_at = Some(ms_to_timestamp(9_999));
+        store.append_entry(&mut e2).unwrap();
+        let stored = store.entry_by_id("e2").unwrap().unwrap();
+        assert!(stored.received_at.is_none());
     }
 
     #[test]

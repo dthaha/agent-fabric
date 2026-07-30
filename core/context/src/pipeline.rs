@@ -11,7 +11,7 @@
 //! Tier 4 veto — policy decides every outcome.
 //!
 //! Clarifying questions are routed to the surface holding presence: the
-//! active lease holder from [`ContextStore::active_lease`]. Actual delivery
+//! active lease holder from [`crate::store::LeaseAuthority::active_lease`]. Actual delivery
 //! (queue when no surface is present, surface on next activity) is a later
 //! concern; the pipeline produces the routed [`FinalDecision::Ask`].
 
@@ -24,7 +24,7 @@ use thiserror::Error;
 use crate::conflict::{StructuralConflict, StructuralDisposition};
 use crate::decoder::{build_decoder_input, ConflictDecoder, DecoderError};
 use crate::mediator::{ConflictMediator, MediatorError, MediatorInput};
-use crate::store::ContextStore;
+use crate::store::{ContextStore, LeaseAuthority};
 
 /// Errors from the reference pipeline: whichever tier failed.
 #[derive(Debug, Error)]
@@ -76,7 +76,7 @@ impl<D: ConflictDecoder, M: ConflictMediator> ConflictPipeline<D, M> {
     /// (exact match, then the `"*"` org default, deny-wins).
     pub async fn resolve_conflict(
         &self,
-        store: &impl ContextStore,
+        store: &(impl ContextStore + LeaseAuthority),
         conflict: &StructuralConflict,
         tool_category: &str,
     ) -> Result<FinalDecision, PipelineError> {
@@ -171,6 +171,8 @@ mod tests {
             policy_version: "v1".into(),
             locus: Locus::Endpoint as i32,
             created_at: Some(ms_to_timestamp(1000 + seq as i64)),
+            received_at: None,
+            disposition: String::new(),
         }
     }
 

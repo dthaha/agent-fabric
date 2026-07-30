@@ -20,7 +20,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use fabric_context::clock::now_ms;
 use fabric_context::db::ms_to_timestamp;
-use fabric_context::{ContextStore, ReconcileReport, SqliteContextStore, StoreError};
+use fabric_context::{
+    ContextStore, LeaseAuthority, ReconcileReport, SqliteContextStore, StoreError,
+};
 use fabric_types::context::{Locus, SessionMeta, SessionState};
 use fabric_types::lease::{
     AcquireLeaseRequest, ActiveLeaseRequest, Lease, PreemptRequest, PresenceRequest,
@@ -186,7 +188,7 @@ async fn acquire(
         .await
         .map_err(store_err)?;
     let ttl = resolve_ttl(req.ttl_ms).map_err(IntoResponse::into_response)?;
-    let mut lease = ContextStore::acquire_lease(
+    let mut lease = LeaseAuthority::acquire_lease(
         &state.store,
         &req.session_id,
         &req.holder_id,
@@ -217,7 +219,7 @@ async fn preempt(
     let locus = locus_or_default(req.locus);
     let ttl = resolve_ttl(req.ttl_ms).map_err(IntoResponse::into_response)?;
 
-    if let Some(old) = ContextStore::active_lease(&state.store, &req.session_id)
+    if let Some(old) = LeaseAuthority::active_lease(&state.store, &req.session_id)
         .await
         .map_err(store_err)?
     {
@@ -252,7 +254,7 @@ async fn preempt(
         );
     }
 
-    let mut lease = ContextStore::acquire_lease(
+    let mut lease = LeaseAuthority::acquire_lease(
         &state.store,
         &req.session_id,
         &req.new_holder_id,
@@ -290,7 +292,7 @@ async fn release(
     State(state): State<Arc<ControlState>>,
     Json(req): Json<ReleaseLeaseRequest>,
 ) -> Result<StatusCode, Response> {
-    ContextStore::release_lease(&state.store, &req.session_id, &req.holder_id)
+    LeaseAuthority::release_lease(&state.store, &req.session_id, &req.holder_id)
         .await
         .map_err(store_err)?;
     Ok(StatusCode::NO_CONTENT)
@@ -301,7 +303,7 @@ async fn active(
     State(state): State<Arc<ControlState>>,
     Query(q): Query<ActiveLeaseRequest>,
 ) -> Result<Json<Lease>, Response> {
-    ContextStore::active_lease(&state.store, &q.session_id)
+    LeaseAuthority::active_lease(&state.store, &q.session_id)
         .await
         .map_err(store_err)?
         .map(Json)
@@ -339,7 +341,7 @@ async fn presence(
 /// offline stretch. Entries were already validated by the endpoint's locus,
 /// so they merge through the deterministic `reconcile` path (same merge as
 /// store-to-store replicas): duplicates skipped, seq collisions resolved by
-/// (created_at, entry_id). Returns the reconcile report.
+/// (received_at, entry_id). Returns the reconcile report.
 async fn replay(
     State(state): State<Arc<ControlState>>,
     Json(req): Json<ReplayRequest>,
@@ -374,7 +376,7 @@ async fn replay(
             .map_err(store_err)?;
     }
 
-    let report = fabric_context::reconcile(&state.store, &staging, &req.session_id)
+    let report = fabric_context::reconcile(&state.store, &staging, &req.session_id, None)
         .await
         .map_err(store_err)?;
     info!(

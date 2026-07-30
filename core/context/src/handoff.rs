@@ -7,7 +7,7 @@ use tracing::instrument;
 use uuid::Uuid;
 
 use crate::db::{Result, StoreError};
-use crate::store::ContextStore;
+use crate::store::{ContextStore, LeaseAuthority};
 use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionState};
 use fabric_types::lease::{HandoffAck, HandoffRequest, Lease};
 
@@ -31,7 +31,7 @@ pub const DEFAULT_LEASE_TTL_MS: i64 = 3_600_000;
 /// catching up.
 #[instrument(skip(store, request), fields(session = %request.session_id))]
 pub async fn execute_handoff(
-    store: &impl ContextStore,
+    store: &(impl ContextStore + LeaseAuthority),
     request: &HandoffRequest,
     to_locus: Locus,
     ttl_ms: i64,
@@ -64,6 +64,8 @@ pub async fn execute_handoff(
         policy_version: String::new(),
         locus: old_lease.locus,
         created_at: None,
+        received_at: None,
+        disposition: String::new(),
     };
     store.append_entry(&mut marker).await?;
 

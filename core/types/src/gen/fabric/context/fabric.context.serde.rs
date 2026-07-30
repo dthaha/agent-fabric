@@ -34,6 +34,12 @@ impl serde::Serialize for ContextEntry {
         if self.created_at.is_some() {
             len += 1;
         }
+        if self.received_at.is_some() {
+            len += 1;
+        }
+        if !self.disposition.is_empty() {
+            len += 1;
+        }
         let mut struct_ser = serializer.serialize_struct("fabric.context.ContextEntry", len)?;
         if !self.entry_id.is_empty() {
             struct_ser.serialize_field("entryId", &self.entry_id)?;
@@ -70,6 +76,12 @@ impl serde::Serialize for ContextEntry {
         if let Some(v) = self.created_at.as_ref() {
             struct_ser.serialize_field("createdAt", v)?;
         }
+        if let Some(v) = self.received_at.as_ref() {
+            struct_ser.serialize_field("receivedAt", v)?;
+        }
+        if !self.disposition.is_empty() {
+            struct_ser.serialize_field("disposition", &self.disposition)?;
+        }
         struct_ser.end()
     }
 }
@@ -94,6 +106,9 @@ impl<'de> serde::Deserialize<'de> for ContextEntry {
             "locus",
             "created_at",
             "createdAt",
+            "received_at",
+            "receivedAt",
+            "disposition",
         ];
 
         #[allow(clippy::enum_variant_names)]
@@ -107,6 +122,8 @@ impl<'de> serde::Deserialize<'de> for ContextEntry {
             PolicyVersion,
             Locus,
             CreatedAt,
+            ReceivedAt,
+            Disposition,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
             fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
@@ -137,6 +154,8 @@ impl<'de> serde::Deserialize<'de> for ContextEntry {
                             "policyVersion" | "policy_version" => Ok(GeneratedField::PolicyVersion),
                             "locus" => Ok(GeneratedField::Locus),
                             "createdAt" | "created_at" => Ok(GeneratedField::CreatedAt),
+                            "receivedAt" | "received_at" => Ok(GeneratedField::ReceivedAt),
+                            "disposition" => Ok(GeneratedField::Disposition),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
                     }
@@ -165,6 +184,8 @@ impl<'de> serde::Deserialize<'de> for ContextEntry {
                 let mut policy_version__ = None;
                 let mut locus__ = None;
                 let mut created_at__ = None;
+                let mut received_at__ = None;
+                let mut disposition__ = None;
                 while let Some(k) = map_.next_key()? {
                     match k {
                         GeneratedField::EntryId => {
@@ -225,6 +246,18 @@ impl<'de> serde::Deserialize<'de> for ContextEntry {
                             }
                             created_at__ = map_.next_value()?;
                         }
+                        GeneratedField::ReceivedAt => {
+                            if received_at__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("receivedAt"));
+                            }
+                            received_at__ = map_.next_value()?;
+                        }
+                        GeneratedField::Disposition => {
+                            if disposition__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("disposition"));
+                            }
+                            disposition__ = Some(map_.next_value()?);
+                        }
                     }
                 }
                 Ok(ContextEntry {
@@ -237,6 +270,8 @@ impl<'de> serde::Deserialize<'de> for ContextEntry {
                     policy_version: policy_version__.unwrap_or_default(),
                     locus: locus__.unwrap_or_default(),
                     created_at: created_at__,
+                    received_at: received_at__,
+                    disposition: disposition__.unwrap_or_default(),
                 })
             }
         }

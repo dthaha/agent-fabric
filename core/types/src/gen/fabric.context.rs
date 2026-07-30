@@ -23,6 +23,15 @@ pub struct ContextEntry {
     pub locus: i32,
     #[prost(message, optional, tag="9")]
     pub created_at: ::core::option::Option<::pbjson_types::Timestamp>,
+    /// Server-stamped on reconcile ingest. Authoritative for cross-replica seq
+    /// collision resolution (ADR 006); created_at is an untrusted endpoint
+    /// claim preserved for audit/display only. Unset for direct local appends.
+    #[prost(message, optional, tag="10")]
+    pub received_at: ::core::option::Option<::pbjson_types::Timestamp>,
+    /// Empty for normal entries; "QUARANTINE" for policy-violating replayed
+    /// entries (ADR 006). Quarantined entries are preserved, never dropped.
+    #[prost(string, tag="11")]
+    pub disposition: ::prost::alloc::string::String,
 }
 /// Structured payload for ENTRY_KIND_TOOL_CALL entries. The entry's opaque
 /// `payload` bytes carry a prost-encoded ToolCall. Additive convention: the

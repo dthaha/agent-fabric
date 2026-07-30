@@ -595,6 +595,8 @@ mod tests {
             policy_version: "v1".into(),
             locus: Locus::Endpoint as i32,
             created_at: Some(ms_to_timestamp(1000 + seq as i64)),
+            received_at: None,
+            disposition: String::new(),
         }
     }
 
@@ -609,6 +611,8 @@ mod tests {
             policy_version: "v1".into(),
             locus: Locus::Endpoint as i32,
             created_at: Some(ms_to_timestamp(1000 + seq as i64)),
+            received_at: None,
+            disposition: String::new(),
         }
     }
 

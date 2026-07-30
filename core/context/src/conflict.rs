@@ -194,6 +194,8 @@ mod tests {
             policy_version: "v1".into(),
             locus: Locus::Endpoint as i32,
             created_at: Some(ms_to_timestamp(ms)),
+            received_at: None,
+            disposition: String::new(),
         }
     }
 

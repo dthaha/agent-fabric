@@ -1,11 +1,18 @@
 //! Async abstraction over the context-plane store. The endpoint runs the
 //! SQLite backend ([`SqliteContextStore`]); server-side deployments can back
-//! the same trait with a multi-replica database (e.g. Postgres) without
-//! touching reconcile or handoff. The surface is exactly what the rest of
-//! this crate uses: op-log append/read plus lease lifecycle.
+//! the same traits with a multi-replica database (e.g. Postgres) and a
+//! dedicated lease authority (e.g. Valkey) without touching reconcile or
+//! handoff (ADR 004). The surface is split in two:
+//!
+//! - [`ContextStore`] — the op-log: append/read, session state, dispositions.
+//! - [`LeaseAuthority`] — the write lease lifecycle.
+//!
+//! [`SqliteContextStore`] implements both (embedded, offline, single-writer
+//! per device); the server can mix a `PostgresContextStore` with a
+//! `ValkeyLeaseAuthority`.
 //!
 //! Uses the `async-trait` crate, matching the rest of the workspace
-//! (`core/tools::Tool`), so the futures are `Send` and the trait stays
+//! (`core/tools::Tool`), so the futures are `Send` and the traits stay
 //! object-safe if a boxed backend is ever needed.
 
 use async_trait::async_trait;
@@ -15,7 +22,7 @@ use tokio::task::spawn_blocking;
 
 use crate::db::{Result, SqliteContextStore};
 
-/// The context store surface used by reconcile, handoff, and catch-up.
+/// The op-log surface used by reconcile, handoff, and catch-up.
 ///
 /// Implementations must preserve the single-writer invariants documented on
 /// [`SqliteContextStore`]: `append_entry` enforces session-ACTIVE and the
@@ -45,6 +52,25 @@ pub trait ContextStore: Send + Sync {
     /// loser to the tail of the log.
     async fn reassign_seq(&self, entry_id: &str, new_seq: u64) -> Result<()>;
 
+    /// Fetch session metadata.
+    async fn session(&self, session_id: &str) -> Result<SessionMeta>;
+
+    /// Raw session-state setter for the handoff protocol (HANDED_OFF, then
+    /// back to ACTIVE on ack). Validated lifecycle transitions stay on the
+    /// concrete store.
+    async fn set_session_state(&self, session_id: &str, state: i32) -> Result<()>;
+
+    /// Set an entry's disposition (ADR 006). Replayed entries that violate
+    /// policy are marked `QUARANTINE`: preserved in the log, never dropped.
+    async fn set_disposition(&self, entry_id: &str, disposition: &str) -> Result<()>;
+}
+
+/// The lease-authority surface (ADR 004). Split from [`ContextStore`] so the
+/// server can back leases with a dedicated authority while the op-log lives
+/// elsewhere. Implementations must enforce single-writer: `acquire_lease`
+/// fails with LeaseConflict while another holder's unexpired lease is active.
+#[async_trait]
+pub trait LeaseAuthority: Send + Sync {
     /// Acquire a turn-scoped write lease. Fails with LeaseConflict while
     /// another holder's unexpired lease is active.
     async fn acquire_lease(
@@ -64,19 +90,11 @@ pub trait ContextStore: Send + Sync {
     /// The session's ACTIVE lease, if any.
     async fn active_lease(&self, session_id: &str) -> Result<Option<Lease>>;
 
-    /// Fetch session metadata.
-    async fn session(&self, session_id: &str) -> Result<SessionMeta>;
-
     /// Verify that `writer` currently holds the session's write lease.
     async fn verify_writer(&self, session_id: &str, writer: &str) -> Result<Lease>;
 
     /// Pin an existing lease's granted_seq (handoff freeze point).
     async fn set_granted_seq(&self, lease_id: &str, granted_seq: u64) -> Result<()>;
-
-    /// Raw session-state setter for the handoff protocol (HANDED_OFF, then
-    /// back to ACTIVE on ack). Validated lifecycle transitions stay on the
-    /// concrete store.
-    async fn set_session_state(&self, session_id: &str, state: i32) -> Result<()>;
 }
 
 /// Run a blocking store call on the blocking thread pool and flatten the
@@ -138,6 +156,28 @@ impl ContextStore for SqliteContextStore {
         run(move || store.reassign_seq(&entry_id, new_seq)).await
     }
 
+    async fn session(&self, session_id: &str) -> Result<SessionMeta> {
+        let store = self.clone();
+        let session_id = session_id.to_string();
+        run(move || store.session(&session_id)).await
+    }
+
+    async fn set_session_state(&self, session_id: &str, state: i32) -> Result<()> {
+        let store = self.clone();
+        let session_id = session_id.to_string();
+        run(move || store.set_session_state(&session_id, state)).await
+    }
+
+    async fn set_disposition(&self, entry_id: &str, disposition: &str) -> Result<()> {
+        let store = self.clone();
+        let entry_id = entry_id.to_string();
+        let disposition = disposition.to_string();
+        run(move || store.set_disposition(&entry_id, &disposition)).await
+    }
+}
+
+#[async_trait]
+impl LeaseAuthority for SqliteContextStore {
     async fn acquire_lease(
         &self,
         session_id: &str,
@@ -170,12 +210,6 @@ impl ContextStore for SqliteContextStore {
         run(move || store.active_lease(&session_id)).await
     }
 
-    async fn session(&self, session_id: &str) -> Result<SessionMeta> {
-        let store = self.clone();
-        let session_id = session_id.to_string();
-        run(move || store.session(&session_id)).await
-    }
-
     async fn verify_writer(&self, session_id: &str, writer: &str) -> Result<Lease> {
         let store = self.clone();
         let session_id = session_id.to_string();
@@ -187,11 +221,5 @@ impl ContextStore for SqliteContextStore {
         let store = self.clone();
         let lease_id = lease_id.to_string();
         run(move || store.set_granted_seq(&lease_id, granted_seq)).await
-    }
-
-    async fn set_session_state(&self, session_id: &str, state: i32) -> Result<()> {
-        let store = self.clone();
-        let session_id = session_id.to_string();
-        run(move || store.set_session_state(&session_id, state)).await
     }
 }

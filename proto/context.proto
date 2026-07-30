@@ -16,6 +16,13 @@ message ContextEntry {
   string policy_version = 7;
   Locus locus = 8;
   google.protobuf.Timestamp created_at = 9;
+  // Server-stamped on reconcile ingest. Authoritative for cross-replica seq
+  // collision resolution (ADR 006); created_at is an untrusted endpoint
+  // claim preserved for audit/display only. Unset for direct local appends.
+  google.protobuf.Timestamp received_at = 10;
+  // Empty for normal entries; "QUARANTINE" for policy-violating replayed
+  // entries (ADR 006). Quarantined entries are preserved, never dropped.
+  string disposition = 11;
 }
 
 // Structured payload for ENTRY_KIND_TOOL_CALL entries. The entry's opaque

@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS context_entries (
     policy_version TEXT NOT NULL,
     locus          INTEGER NOT NULL,
     created_at_ms  INTEGER NOT NULL,
+    received_at_ms INTEGER,
+    disposition    TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (session_id, seq),
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );

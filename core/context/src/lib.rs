@@ -44,5 +44,5 @@ pub use mediator::{
     VerdictView, PROPOSAL_OUTPUT_SCHEMA,
 };
 pub use pipeline::{ConflictPipeline, PipelineError, DEFAULT_CONTEXT_WINDOW};
-pub use reconcile::{reconcile, ReconcileReport, SeqConflict};
-pub use store::ContextStore;
+pub use reconcile::{reconcile, PolicyViolation, ReconcileReport, SeqConflict};
+pub use store::{ContextStore, LeaseAuthority};

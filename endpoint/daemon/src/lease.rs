@@ -376,7 +376,7 @@ pub async fn lease_maintenance(state: Arc<DaemonState>, shutdown: CancellationTo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabric_context::{ContextStore, SqliteContextStore};
+    use fabric_context::{ContextStore, LeaseAuthority, SqliteContextStore};
     use fabric_types::context::{EntryKind, SessionState};
 
     use crate::config::DaemonConfig;
@@ -427,6 +427,8 @@ mod tests {
             policy_version: String::new(),
             locus: Locus::Endpoint as i32,
             created_at: None,
+            received_at: None,
+            disposition: String::new(),
         };
         store.append_entry(&mut entry).unwrap();
         store.release_lease(session_id, "endpoint-test").unwrap();
@@ -513,7 +515,7 @@ mod tests {
         }
 
         // The server agrees on the active lease.
-        let active = ContextStore::active_lease(&control.store, "s1")
+        let active = LeaseAuthority::active_lease(&control.store, "s1")
             .await
             .unwrap()
             .unwrap();
@@ -522,7 +524,7 @@ mod tests {
         // Release at the end of the turn.
         let client = state.lease_client.clone().unwrap();
         client.release("s1").await.unwrap();
-        assert!(ContextStore::active_lease(&control.store, "s1")
+        assert!(LeaseAuthority::active_lease(&control.store, "s1")
             .await
             .unwrap()
             .is_none());

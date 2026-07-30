@@ -5,15 +5,27 @@
 //! - Entries already known (by entry_id) are skipped.
 //! - Remote entries whose seq is free locally are inserted in place.
 //! - Seq collisions are resolved deterministically: the entry with the
-//!   earlier (created_at, entry_id) keeps the contested seq; the loser is
+//!   earlier (received_at, entry_id) keeps the contested seq; the loser is
 //!   re-appended at the tail with a fresh seq. Both replicas converge to the
-//!   same final log regardless of merge direction.
+//!   same final log regardless of merge direction. `received_at` is
+//!   server-stamped on ingest (ADR 006) and authoritative; `created_at` is
+//!   an untrusted endpoint claim used only as a fallback for entries
+//!   predating the field.
+//! - When a policy is supplied, replayed entries are re-evaluated against
+//!   its tool rules: a tool call matching a DENY rule is preserved but
+//!   marked `QUARANTINE` (ADR 006).
 
 use serde::{Deserialize, Serialize};
+
+use fabric_types::context::ContextEntry;
+use fabric_types::policy::{EndpointPolicy, ToolAction};
 
 use crate::conflict::{detect_in_region, StructuralConflict};
 use crate::db::{timestamp_to_ms, Result};
 use crate::store::ContextStore;
+
+/// Disposition stamped on replayed entries that violate policy (ADR 006).
+pub const DISPOSITION_QUARANTINE: &str = "QUARANTINE";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeqConflict {
@@ -21,6 +33,17 @@ pub struct SeqConflict {
     pub kept_entry_id: String,
     pub moved_entry_id: String,
     pub moved_to_seq: u64,
+}
+
+/// A replayed entry that violated a policy tool rule on re-evaluation
+/// (ADR 006). The entry is kept in the log with `QUARANTINE` disposition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyViolation {
+    pub entry_id: String,
+    /// The tool_pattern of the DENY rule that matched.
+    pub rule: String,
+    /// The rule's action (always `TOOL_ACTION_DENY` for quarantines).
+    pub action: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -34,13 +57,26 @@ pub struct ReconcileReport {
     /// tool + same target + different params. Model-free; `Escalate`
     /// dispositions are candidates for the model tiers (Phase E/F).
     pub structural_conflicts: Vec<StructuralConflict>,
+    /// Replayed entries quarantined by policy re-evaluation (ADR 006).
+    /// Empty when reconcile ran without a policy.
+    pub policy_violations: Vec<PolicyViolation>,
 }
 
-/// Merge all remote entries for `session_id` into the local store.
+/// The timestamp that orders an entry in seq-collision resolution:
+/// `received_at` (server-stamped on ingest, authoritative) with a
+/// `created_at` fallback for entries predating the field (ADR 006).
+fn ordering_ms(entry: &ContextEntry) -> i64 {
+    timestamp_to_ms(entry.received_at.as_ref().or(entry.created_at.as_ref()))
+}
+
+/// Merge all remote entries for `session_id` into the local store. When
+/// `policy` is supplied, replayed tool-call entries are re-evaluated against
+/// its tool rules and DENY matches are quarantined.
 pub async fn reconcile(
     local: &impl ContextStore,
     remote: &impl ContextStore,
     session_id: &str,
+    policy: Option<&EndpointPolicy>,
 ) -> Result<ReconcileReport> {
     let mut report = ReconcileReport {
         session_id: session_id.to_string(),
@@ -49,6 +85,7 @@ pub async fn reconcile(
 
     let remote_entries = remote.entries_since(session_id, 0).await?;
     let mut applied_ids = std::collections::HashSet::new();
+    let mut applied_entries = Vec::new();
     for remote_entry in remote_entries {
         if local.entry_by_id(&remote_entry.entry_id).await?.is_some() {
             report.duplicates += 1;
@@ -59,13 +96,15 @@ pub async fn reconcile(
         match local.entry_at_seq(session_id, remote_entry.seq).await? {
             None => {
                 local.insert_entry_raw(&remote_entry).await?;
+                applied_entries.push(remote_entry);
                 report.applied += 1;
             }
             Some(local_entry) => {
-                // Deterministic winner: earlier (created_at, entry_id) keeps
-                // the contested seq.
-                let remote_ms = timestamp_to_ms(remote_entry.created_at.as_ref());
-                let local_ms = timestamp_to_ms(local_entry.created_at.as_ref());
+                // Deterministic winner: earlier (received_at, entry_id) keeps
+                // the contested seq. received_at falls back to created_at
+                // for entries predating the field (ADR 006).
+                let remote_ms = ordering_ms(&remote_entry);
+                let local_ms = ordering_ms(&local_entry);
                 let remote_wins =
                     (remote_ms, &remote_entry.entry_id) < (local_ms, &local_entry.entry_id);
 
@@ -80,6 +119,7 @@ pub async fn reconcile(
                         moved_entry_id: local_entry.entry_id,
                         moved_to_seq: tail,
                     });
+                    applied_entries.push(remote_entry);
                 } else {
                     let mut moved = remote_entry.clone();
                     moved.seq = tail;
@@ -87,11 +127,39 @@ pub async fn reconcile(
                     report.conflicts.push(SeqConflict {
                         seq: remote_entry.seq,
                         kept_entry_id: local_entry.entry_id,
-                        moved_entry_id: remote_entry.entry_id,
+                        moved_entry_id: remote_entry.entry_id.clone(),
                         moved_to_seq: tail,
                     });
+                    applied_entries.push(moved);
                 }
                 report.applied += 1;
+            }
+        }
+    }
+
+    // ADR 006 policy re-evaluation: entries that were legal under the
+    // policy version at write time may violate the current policy. Denied
+    // tool calls are quarantined — preserved in the log, never dropped.
+    if let Some(policy) = policy {
+        for entry in &applied_entries {
+            if entry.kind != fabric_types::context::EntryKind::ToolCall as i32 {
+                continue;
+            }
+            let Ok(call) = crate::tool_call::decode(&entry.payload) else {
+                continue;
+            };
+            if let Some(rule) = policy.tool_rules.iter().find(|r| {
+                r.action == ToolAction::Deny as i32
+                    && fabric_policy::eval::glob_matches(&r.tool_pattern, &call.tool_name)
+            }) {
+                local
+                    .set_disposition(&entry.entry_id, DISPOSITION_QUARANTINE)
+                    .await?;
+                report.policy_violations.push(PolicyViolation {
+                    entry_id: entry.entry_id.clone(),
+                    rule: rule.tool_pattern.clone(),
+                    action: ToolAction::Deny.as_str_name().to_string(),
+                });
             }
         }
     }
@@ -153,7 +221,7 @@ mod tests {
             server.insert_entry_raw(&e).unwrap();
         }
 
-        let report = reconcile(&endpoint, &server, "s1").await.unwrap();
+        let report = reconcile(&endpoint, &server, "s1", None).await.unwrap();
         assert_eq!(report.applied, 2);
         assert_eq!(report.duplicates, 2);
         assert!(report.conflicts.is_empty());
@@ -175,8 +243,9 @@ mod tests {
         b.insert_entry_raw(&eb).unwrap();
 
         // Earlier created_at wins the contested seq: from-server (t=1000)
-        // keeps seq 1, from-endpoint (t=2000) is moved to the tail.
-        let report_ab = reconcile(&a, &b, "s1").await.unwrap();
+        // keeps seq 1, from-endpoint (t=2000) is moved to the tail. Neither
+        // entry has received_at, so created_at is the fallback ordering.
+        let report_ab = reconcile(&a, &b, "s1", None).await.unwrap();
         assert_eq!(report_ab.applied, 1);
         assert_eq!(report_ab.conflicts.len(), 1);
         let c = &report_ab.conflicts[0];
@@ -188,7 +257,7 @@ mod tests {
         // Merging in the opposite direction converges to the same log. The
         // already-resolved remote log applies cleanly (no new conflict:
         // the moved entry arrives at its tail position).
-        let report_ba = reconcile(&b, &a, "s1").await.unwrap();
+        let report_ba = reconcile(&b, &a, "s1", None).await.unwrap();
         assert_eq!(report_ba.applied, 1);
         assert_eq!(report_ba.conflicts.len(), 0);
 
@@ -221,8 +290,8 @@ mod tests {
         eb.seq = 1;
         b.insert_entry_raw(&eb).unwrap();
 
-        let first = reconcile(&a, &b, "s1").await.unwrap();
-        let second = reconcile(&a, &b, "s1").await.unwrap();
+        let first = reconcile(&a, &b, "s1", None).await.unwrap();
+        let second = reconcile(&a, &b, "s1", None).await.unwrap();
         assert_eq!(first.applied, 1);
         assert_eq!(second.applied, 0);
         assert_eq!(second.duplicates, 1);
@@ -270,7 +339,7 @@ mod tests {
         );
         server.insert_entry_raw(&remote_call).unwrap();
 
-        let report = reconcile(&endpoint, &server, "s1").await.unwrap();
+        let report = reconcile(&endpoint, &server, "s1", None).await.unwrap();
         assert_eq!(report.applied, 1);
         // Seq-collision tracking is untouched and still populated.
         assert_eq!(report.conflicts.len(), 1);
@@ -312,7 +381,7 @@ mod tests {
         );
         server.insert_entry_raw(&remote_call).unwrap();
 
-        let report = reconcile(&endpoint, &server, "s1").await.unwrap();
+        let report = reconcile(&endpoint, &server, "s1", None).await.unwrap();
         assert_eq!(report.structural_conflicts.len(), 1);
         let c = &report.structural_conflicts[0];
         assert_eq!(
@@ -346,8 +415,189 @@ mod tests {
         );
         server.insert_entry_raw(&remote_call).unwrap();
 
-        let report = reconcile(&endpoint, &server, "s1").await.unwrap();
+        let report = reconcile(&endpoint, &server, "s1", None).await.unwrap();
         assert_eq!(report.applied, 1);
         assert!(report.structural_conflicts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn backdated_created_at_loses_to_received_at_ordering() {
+        // ADR 006: created_at is an untrusted endpoint claim. A remote entry
+        // with a backdated created_at would win under the old tiebreaker;
+        // with server-stamped received_at it must lose.
+        let a = replica("s1", "l1", "endpoint-1");
+        let b = replica("s1", "l2", "server-1");
+
+        let mut local = entry_at("local", "s1", "endpoint-1", 2000);
+        local.seq = 1;
+        local.received_at = Some(ms_to_timestamp(100));
+        a.insert_entry_raw(&local).unwrap();
+
+        let mut remote = entry_at("backdated", "s1", "server-1", 1);
+        remote.seq = 1;
+        remote.received_at = Some(ms_to_timestamp(200));
+        b.insert_entry_raw(&remote).unwrap();
+
+        // received_at ordering: local (100) keeps seq 1; the backdated
+        // remote entry (created_at=1, received_at=200) moves to the tail.
+        let report = reconcile(&a, &b, "s1", None).await.unwrap();
+        assert_eq!(report.conflicts.len(), 1);
+        let c = &report.conflicts[0];
+        assert_eq!(c.kept_entry_id, "local");
+        assert_eq!(c.moved_entry_id, "backdated");
+        assert_eq!(c.moved_to_seq, 2);
+
+        let log: Vec<_> = a
+            .entries_since("s1", 0)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.seq, e.entry_id))
+            .collect();
+        assert_eq!(
+            log,
+            vec![(1, "local".to_string()), (2, "backdated".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn received_at_falls_back_to_created_at_when_unset() {
+        // Entries predating the received_at field order by created_at.
+        let a = replica("s1", "l1", "endpoint-1");
+        let b = replica("s1", "l2", "server-1");
+
+        let mut local = entry_at("local", "s1", "endpoint-1", 2000);
+        local.seq = 1;
+        a.insert_entry_raw(&local).unwrap();
+        let mut remote = entry_at("remote", "s1", "server-1", 1000);
+        remote.seq = 1;
+        b.insert_entry_raw(&remote).unwrap();
+
+        let report = reconcile(&a, &b, "s1", None).await.unwrap();
+        assert_eq!(report.conflicts[0].kept_entry_id, "remote");
+        assert_eq!(report.conflicts[0].moved_entry_id, "local");
+    }
+
+    use fabric_types::policy::ToolRule;
+
+    fn deny_policy(pattern: &str) -> fabric_types::policy::EndpointPolicy {
+        fabric_types::policy::EndpointPolicy {
+            policy_id: "p1".into(),
+            version: "v1".into(),
+            org_id: String::new(),
+            data_rules: vec![],
+            tool_rules: vec![ToolRule {
+                tool_pattern: pattern.into(),
+                action: ToolAction::Deny as i32,
+                condition: String::new(),
+            }],
+            model_rules: vec![],
+            cua: None,
+            kill_switch: false,
+            max_retention_hours: 0,
+            dlp_patterns: vec![],
+            safety: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_violating_replayed_entries_are_quarantined() {
+        let endpoint = replica("s1", "l1", "endpoint-1");
+        let server = replica("s1", "l2", "server-1");
+
+        let mut local = entry_at("local-msg", "s1", "endpoint-1", 1000);
+        local.seq = 1;
+        endpoint.insert_entry_raw(&local).unwrap();
+
+        // The remote replica executed shell.exec while partitioned; the
+        // current policy denies it.
+        let denied = tool_call_entry(
+            "denied-call",
+            "server-1",
+            2000,
+            2,
+            tool_call("shell.exec", "/etc", "1", ""),
+        );
+        server.insert_entry_raw(&denied).unwrap();
+        let allowed = tool_call_entry(
+            "allowed-call",
+            "server-1",
+            3000,
+            3,
+            tool_call("fs.read", "/tmp/x", "1", ""),
+        );
+        server.insert_entry_raw(&allowed).unwrap();
+
+        let policy = deny_policy("shell.*");
+        let report = reconcile(&endpoint, &server, "s1", Some(&policy))
+            .await
+            .unwrap();
+        assert_eq!(report.applied, 2);
+        assert_eq!(report.policy_violations.len(), 1);
+        let v = &report.policy_violations[0];
+        assert_eq!(v.entry_id, "denied-call");
+        assert_eq!(v.rule, "shell.*");
+        assert_eq!(v.action, "TOOL_ACTION_DENY");
+
+        // Quarantined entries are preserved in the log, never dropped.
+        let stored = endpoint.entry_by_id("denied-call").unwrap().unwrap();
+        assert_eq!(stored.disposition, DISPOSITION_QUARANTINE);
+        let stored = endpoint.entry_by_id("allowed-call").unwrap().unwrap();
+        assert_eq!(stored.disposition, "");
+        assert_eq!(endpoint.head_seq("s1").unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn reconcile_without_policy_never_quarantines() {
+        // None policy: identical merge behavior, no dispositions stamped.
+        let endpoint = replica("s1", "l1", "endpoint-1");
+        let server = replica("s1", "l2", "server-1");
+
+        let denied = tool_call_entry(
+            "denied-call",
+            "server-1",
+            1000,
+            1,
+            tool_call("shell.exec", "/etc", "1", ""),
+        );
+        server.insert_entry_raw(&denied).unwrap();
+
+        let report = reconcile(&endpoint, &server, "s1", None).await.unwrap();
+        assert_eq!(report.applied, 1);
+        assert!(report.policy_violations.is_empty());
+        let stored = endpoint.entry_by_id("denied-call").unwrap().unwrap();
+        assert_eq!(stored.disposition, "");
+    }
+
+    #[tokio::test]
+    async fn reconcile_with_policy_is_idempotent() {
+        let endpoint = replica("s1", "l1", "endpoint-1");
+        let server = replica("s1", "l2", "server-1");
+
+        let denied = tool_call_entry(
+            "denied-call",
+            "server-1",
+            1000,
+            1,
+            tool_call("shell.exec", "/etc", "1", ""),
+        );
+        server.insert_entry_raw(&denied).unwrap();
+
+        let policy = deny_policy("shell.*");
+        let first = reconcile(&endpoint, &server, "s1", Some(&policy))
+            .await
+            .unwrap();
+        assert_eq!(first.applied, 1);
+        assert_eq!(first.policy_violations.len(), 1);
+
+        // Second run: the entry is a duplicate; no re-quarantine, and the
+        // disposition stamped by the first run survives.
+        let second = reconcile(&endpoint, &server, "s1", Some(&policy))
+            .await
+            .unwrap();
+        assert_eq!(second.applied, 0);
+        assert_eq!(second.duplicates, 1);
+        assert!(second.policy_violations.is_empty());
+        let stored = endpoint.entry_by_id("denied-call").unwrap().unwrap();
+        assert_eq!(stored.disposition, DISPOSITION_QUARANTINE);
     }
 }
