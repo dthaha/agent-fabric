@@ -50,6 +50,15 @@ pub enum StoreError {
     Serde(#[from] serde_json::Error),
     #[error("blocking store task failed to join: {0}")]
     Join(#[from] tokio::task::JoinError),
+    // ADR 004: server backends backed by Postgres and Valkey. These variants
+    // are additive (the endpoint never constructs them) and map any backend
+    // failure into the shared [`Result`] type used by the [`crate::store`]
+    // traits. The string carries the underlying error's `Display` form so the
+    // error stays `Send + Sync` without depending on the backend crates here.
+    #[error("postgres error: {0}")]
+    Postgres(String),
+    #[error("valkey error: {0}")]
+    Valkey(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;

@@ -6,19 +6,24 @@
 //!   loopback-only by default so an unauthenticated control plane is never
 //!   exposed to the network by accident — put a proxy with auth in front
 //!   before binding wider)
-//! - `FABRIC_CONTROL_DB` — SQLite context store path (default `fabric-control.db`)
-//! - `FABRIC_IDENTITY_DB` — SQLite SOUL/device registry path
-//!   (default `fabric-identity.db`)
+//! - `FABRIC_PG_URL` — **required** Postgres op-log DSN (e.g.
+//!   `postgres://fabric:fabric@localhost:5432/fabric`). ADR 004: no SQLite
+//!   fallback for the server.
+//! - `FABRIC_KV_URL` — **required** RESP lease-authority URL (e.g.
+//!   `redis://localhost:6379`; Valkey recommended).
 //! - `FABRIC_SERVER_IDENTITY` — identity stamped into `granted_by`
 //!   (default `fabric-server`)
-//! - `FABRIC_ORG_ID` — org fallback for single-org deployments
-//!   (default `default`)
+//! - `FABRIC_ORG_ID` — org fallback for single-org deployments (default
+//!   `default`)
 
 use anyhow::{Context, Result};
-use fabric_context::SqliteContextStore;
 use fabric_control::soul::SoulRegistry;
-use fabric_control::ControlState;
+use fabric_control::{ControlState, PostgresContextStore, ValkeyLeaseAuthority};
 use tracing::info;
+
+fn required_env(name: &str) -> Result<String> {
+    std::env::var(name).with_context(|| format!("{name} is required (ADR 004: no SQLite fallback)"))
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,15 +37,22 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "127.0.0.1:47800".into())
         .parse()
         .context("parsing FABRIC_CONTROL_ADDR")?;
-    let db_path = std::env::var("FABRIC_CONTROL_DB").unwrap_or_else(|_| "fabric-control.db".into());
-    let identity_db_path =
-        std::env::var("FABRIC_IDENTITY_DB").unwrap_or_else(|_| "fabric-identity.db".into());
 
-    let store = SqliteContextStore::open(&db_path)
-        .with_context(|| format!("opening context store {db_path}"))?;
-    let souls = SoulRegistry::open(&identity_db_path)
-        .with_context(|| format!("opening identity registry {identity_db_path}"))?;
-    let state = ControlState::from_env(store, souls);
+    // ADR 004: Postgres + Valkey are the only server stores. Both are
+    // REQUIRED — there is no SQLite fallback path, not even for dev.
+    let pg_url = required_env("FABRIC_PG_URL")?;
+    let kv_url = required_env("FABRIC_KV_URL")?;
+
+    // The op-log runs the embedded migration on connect; the SOUL registry
+    // shares the resulting pool (same Postgres, same init migration).
+    let pg = PostgresContextStore::connect(&pg_url)
+        .await
+        .with_context(|| format!("connecting context store {pg_url}"))?;
+    let souls = SoulRegistry::new(pg.pool().clone());
+    let kv = ValkeyLeaseAuthority::connect(&kv_url)
+        .await
+        .with_context(|| format!("connecting lease authority {kv_url}"))?;
+    let state = ControlState::from_env(pg, kv, souls);
 
     info!(%addr, "fabric-control listening");
     fabric_control::serve(state, addr, wait_for_shutdown_signal()).await?;

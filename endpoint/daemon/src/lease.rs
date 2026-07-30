@@ -402,6 +402,8 @@ pub async fn lease_maintenance(state: Arc<DaemonState>, shutdown: CancellationTo
 mod tests {
     use super::*;
     use fabric_context::{ContextStore, LeaseAuthority, SqliteContextStore};
+    use fabric_control::soul::SoulRegistry;
+    use fabric_control::{ControlState, PostgresContextStore, ValkeyLeaseAuthority};
     use fabric_types::context::{EntryKind, SessionState};
 
     use crate::config::DaemonConfig;
@@ -459,11 +461,20 @@ mod tests {
         store.release_lease(session_id, "endpoint-test").unwrap();
     }
 
-    /// Bind a control plane on an ephemeral localhost port.
-    async fn spawn_control() -> (String, Arc<fabric_control::ControlState>) {
-        let store = SqliteContextStore::open_in_memory().unwrap();
-        let souls = fabric_control::soul::SoulRegistry::open_in_memory().unwrap();
-        let control = fabric_control::ControlState::new(store, souls, "fabric-server-test");
+    /// Bind a control plane on an ephemeral localhost port, backed by the
+    /// server's Postgres + Valkey stores (ADR 004 — the server no longer has a
+    /// SQLite fallback). Requires `FABRIC_PG_URL` + `FABRIC_KV_URL`.
+    async fn spawn_control() -> (String, Arc<ControlState>) {
+        let pg =
+            PostgresContextStore::connect(&std::env::var("FABRIC_PG_URL").expect("FABRIC_PG_URL"))
+                .await
+                .unwrap();
+        let souls = SoulRegistry::new(pg.pool().clone());
+        let kv =
+            ValkeyLeaseAuthority::connect(&std::env::var("FABRIC_KV_URL").expect("FABRIC_KV_URL"))
+                .await
+                .unwrap();
+        let control = ControlState::from_env(pg, kv, souls);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = fabric_control::router(Arc::clone(&control));
@@ -508,6 +519,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires Postgres + Valkey (FABRIC_PG_URL + FABRIC_KV_URL)"]
     async fn acquire_renew_release_against_control_plane() {
         let (url, control) = spawn_control().await;
         let state = DaemonState::new(
@@ -541,7 +553,7 @@ mod tests {
         }
 
         // The server agrees on the active lease.
-        let active = LeaseAuthority::active_lease(&control.store, "s1")
+        let active = LeaseAuthority::active_lease(&control.kv, "s1")
             .await
             .unwrap()
             .unwrap();
@@ -550,13 +562,14 @@ mod tests {
         // Release at the end of the turn.
         let client = state.lease_client.clone().unwrap();
         client.release("s1").await.unwrap();
-        assert!(LeaseAuthority::active_lease(&control.store, "s1")
+        assert!(LeaseAuthority::active_lease(&control.kv, "s1")
             .await
             .unwrap()
             .is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires Postgres + Valkey (FABRIC_PG_URL + FABRIC_KV_URL)"]
     async fn reconnect_reacquires_and_replays_local_oplog() {
         // Start against a dead server: lease wanted, real turns committed.
         let dead = dead_url().await;
@@ -589,7 +602,7 @@ mod tests {
         }
 
         // The offline turns converged on the server, in order.
-        let entries = ContextStore::entries_since(&control.store, "s1", 0)
+        let entries = ContextStore::entries_since(&control.pg, "s1", 0)
             .await
             .unwrap();
         let ids: Vec<&str> = entries.iter().map(|e| e.entry_id.as_str()).collect();

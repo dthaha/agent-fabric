@@ -1,13 +1,14 @@
-//! Server-side control plane: the admin API for policy CRUD, audit queries, and
-//! the SOUL home (memory plane source of truth). Serves the admin console.
+//! Server-side control plane: the admin API for lease authority and offline
+//! op-log replay. Backed by Postgres (op-log) + Valkey (leases) per ADR 004 —
+//! the SQLite fallback is gone from the server entirely. The endpoint daemon
+//! is a client of this API; its local SQLite store stays the offline op-log,
+//! not the lease source.
 //!
-//! Phase C lands the lease authority here. The server is the single source of
-//! truth for session write leases: it grants, renews, preempts, and releases
-//! leases, stamping every timestamp with the SERVER clock (never the client's
-//! — device clocks drift and are user-settable). Preemption is a presence
-//! signal, not a timestamp race: the latest server-observed activity from a
-//! surface wins the lease. The endpoint daemon is a client of this API; its
-//! local SQLite store stays the offline op-log, not the lease source.
+//! The server is the single source of truth for session write leases: it
+//! grants, renews, preempts, and releases them (Valkey), stamping every
+//! timestamp with the SERVER clock (never the client's — device clocks drift
+//! and are user-settable). Preemption is a presence signal, not a timestamp
+//! race: the latest server-observed activity from a surface wins the lease.
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -16,19 +17,29 @@ use std::sync::Arc;
 pub mod identity;
 pub mod soul;
 
+#[cfg(feature = "server-store")]
+pub mod pg_store;
+#[cfg(feature = "server-store")]
+pub mod valkey_lease;
+
+#[cfg(feature = "server-store")]
+pub use pg_store::PostgresContextStore;
+#[cfg(feature = "server-store")]
+pub use valkey_lease::ValkeyLeaseAuthority;
+
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use fabric_context::clock::now_ms;
 use fabric_context::db::ms_to_timestamp;
 use fabric_context::{
-    ContextStore, LeaseAuthority, ReconcileReport, SqliteContextStore, StoreError,
-    DEFAULT_LEASE_TTL_MS, MAX_LEASE_TTL_MS,
+    ContextStore, LeaseAuthority, ReconcileReport, StoreError, DEFAULT_LEASE_TTL_MS,
+    MAX_LEASE_TTL_MS,
 };
-use fabric_types::context::{Locus, SessionMeta, SessionState};
+use fabric_types::context::{ContextEntry, Locus, SessionMeta, SessionState};
 use fabric_types::lease::{
     AcquireLeaseRequest, ActiveLeaseRequest, Lease, PreemptRequest, PresenceRequest,
     ReleaseLeaseRequest, RenewLeaseRequest, ReplayRequest,
@@ -36,6 +47,8 @@ use fabric_types::lease::{
 use fabric_types::policy::EndpointPolicy;
 use serde_json::{json, Value};
 use tracing::{info, warn};
+
+use async_trait::async_trait;
 
 use crate::identity::{identity_middleware, Identity, IdentityContext};
 use crate::soul::SoulRegistry;
@@ -57,11 +70,14 @@ fn resolve_ttl(ttl_ms: Option<i64>) -> Result<i64, (StatusCode, Json<Value>)> {
     Ok(ttl)
 }
 
-/// State shared by every control-plane handler. The store is the lease
-/// authority; `souls` is the SOUL + device registry (ADR 007); `identity`
-/// is stamped into `granted_by` on every lease the server issues.
+/// State shared by every control-plane handler. `pg` is the op-log
+/// ([`PostgresContextStore`]); `kv` is the lease authority
+/// ([`ValkeyLeaseAuthority`]); `souls` is the SOUL + device registry on the
+/// same Postgres pool; `identity` is stamped into `granted_by` on every lease
+/// the server issues.
 pub struct ControlState {
-    pub store: SqliteContextStore,
+    pub pg: PostgresContextStore,
+    pub kv: ValkeyLeaseAuthority,
     pub souls: SoulRegistry,
     pub identity: String,
     /// The effective policy replayed entries are re-evaluated against
@@ -72,12 +88,14 @@ pub struct ControlState {
 
 impl ControlState {
     pub fn new(
-        store: SqliteContextStore,
+        pg: PostgresContextStore,
+        kv: ValkeyLeaseAuthority,
         souls: SoulRegistry,
         identity: impl Into<String>,
     ) -> Arc<Self> {
         Arc::new(Self {
-            store,
+            pg,
+            kv,
             souls,
             identity: identity.into(),
             policy: std::sync::RwLock::new(None),
@@ -85,10 +103,14 @@ impl ControlState {
     }
 
     /// Identity from `FABRIC_SERVER_IDENTITY`, defaulting to "fabric-server".
-    pub fn from_env(store: SqliteContextStore, souls: SoulRegistry) -> Arc<Self> {
+    pub fn from_env(
+        pg: PostgresContextStore,
+        kv: ValkeyLeaseAuthority,
+        souls: SoulRegistry,
+    ) -> Arc<Self> {
         let identity =
             std::env::var("FABRIC_SERVER_IDENTITY").unwrap_or_else(|_| "fabric-server".into());
-        Self::new(store, souls, identity)
+        Self::new(pg, kv, souls, identity)
     }
 
     /// Install the effective policy used for replay re-evaluation (ADR 006).
@@ -111,7 +133,7 @@ pub fn router(state: Arc<ControlState>) -> Router {
         .route("/lease/acquire", post(acquire))
         .route("/lease/preempt", post(preempt))
         .route("/lease/renew", post(renew))
-        .route("/lease/release", axum::routing::delete(release))
+        .route("/lease/release", delete(release))
         .route("/lease/active", get(active))
         .route("/presence", post(presence))
         .route("/context/replay", post(replay))
@@ -165,11 +187,12 @@ fn store_err(e: StoreError) -> Response {
 }
 
 /// Ensure the session row exists so lease FK constraints hold. Idempotent
-/// (INSERT OR IGNORE): first writer to touch a session creates it bound to
-/// the caller's identity (user/org/soul), with server-stamped timestamps.
-/// Returns the (possibly pre-existing) session after the tenancy check.
+/// (ON CONFLICT DO NOTHING): first writer to touch a session creates it
+/// bound to the caller's identity (user/org/soul), with server-stamped
+/// timestamps. Returns the (possibly pre-existing) session after the tenancy
+/// check.
 async fn ensure_session(
-    store: &SqliteContextStore,
+    pg: &PostgresContextStore,
     session_id: &str,
     ctx: &IdentityContext,
 ) -> Result<SessionMeta, Response> {
@@ -184,18 +207,9 @@ async fn ensure_session(
         labels: Default::default(),
         org_id: ctx.org_id.clone(),
     };
-    let store2 = store.clone();
-    tokio::task::spawn_blocking(move || store2.create_session(&meta))
+    pg.create_session(&meta).await.map_err(store_err)?;
+    let session = ContextStore::session(pg, session_id)
         .await
-        .map_err(StoreError::from)
-        .map_err(store_err)?
-        .map_err(store_err)?;
-    let store2 = store.clone();
-    let session_id = session_id.to_string();
-    let session = tokio::task::spawn_blocking(move || store2.session(&session_id))
-        .await
-        .map_err(StoreError::from)
-        .map_err(store_err)?
         .map_err(store_err)?;
     authorize_session(&session, ctx).map_err(IntoResponse::into_response)?;
     Ok(session)
@@ -226,17 +240,11 @@ fn authorize_session(
 /// renew, active): authorize when the session exists; when it does not, let
 /// the store surface its own 404.
 async fn authorize_if_session_exists(
-    store: &SqliteContextStore,
+    pg: &PostgresContextStore,
     session_id: &str,
     ctx: &IdentityContext,
 ) -> Result<(), Response> {
-    let store2 = store.clone();
-    let session_id = session_id.to_string();
-    let session = tokio::task::spawn_blocking(move || store2.session(&session_id))
-        .await
-        .map_err(StoreError::from)
-        .map_err(store_err)?;
-    match session {
+    match ContextStore::session(pg, session_id).await {
         Ok(session) => {
             authorize_session(&session, ctx).map_err(IntoResponse::into_response)?;
             Ok(())
@@ -247,22 +255,15 @@ async fn authorize_if_session_exists(
 }
 
 /// Stamp the lease with the server's identity and persist the attribution.
-/// Timestamps already came from `now_ms` inside the store — which runs on
-/// the server — so the returned lease is fully server-stamped.
+/// Timestamps already came from the server clock inside the Valkey authority
+/// — so the returned lease is fully server-stamped.
 async fn stamp_granted_by(
-    store: &SqliteContextStore,
+    kv: &ValkeyLeaseAuthority,
     lease: &mut Lease,
     identity: &str,
 ) -> Result<(), StoreError> {
-    let store = store.clone();
-    let lease_id = lease.lease_id.clone();
-    let identity = identity.to_string();
-    tokio::task::spawn_blocking({
-        let identity = identity.clone();
-        move || store.set_granted_by(&lease_id, &identity)
-    })
-    .await??;
-    lease.granted_by = identity;
+    kv.set_granted_by(&lease.lease_id, identity).await?;
+    lease.granted_by = identity.to_string();
     Ok(())
 }
 
@@ -286,10 +287,10 @@ async fn acquire(
     Identity(ctx): Identity,
     Json(req): Json<AcquireLeaseRequest>,
 ) -> Result<Json<Lease>, Response> {
-    ensure_session(&state.store, &req.session_id, &ctx).await?;
+    ensure_session(&state.pg, &req.session_id, &ctx).await?;
     let ttl = resolve_ttl(req.ttl_ms).map_err(IntoResponse::into_response)?;
     let mut lease = LeaseAuthority::acquire_lease(
-        &state.store,
+        &state.kv,
         &req.session_id,
         &ctx.holder_id,
         locus_or_default(req.locus),
@@ -297,7 +298,7 @@ async fn acquire(
     )
     .await
     .map_err(store_err)?;
-    stamp_granted_by(&state.store, &mut lease, &state.identity)
+    stamp_granted_by(&state.kv, &mut lease, &state.identity)
         .await
         .map_err(store_err)?;
     info!(session = %req.session_id, holder = %ctx.holder_id, lease = %lease.lease_id, "lease granted");
@@ -305,9 +306,8 @@ async fn acquire(
 }
 
 /// Presence-driven preemption: the surface with the latest server-observed
-/// activity takes the lease. The outgoing lease is revoked with
-/// `preempted_by` recorded for audit and a fresh server-stamped lease is
-/// granted to the caller's device — atomically, in one store transaction,
+/// activity takes the lease. The outgoing lease is revoked atomically (Valkey
+/// Lua) and a fresh server-stamped lease is granted to the caller's device —
 /// so a failure can never leave the session writerless. If the caller
 /// already holds the lease this is a no-op returning the current lease.
 async fn preempt(
@@ -315,45 +315,23 @@ async fn preempt(
     Identity(ctx): Identity,
     Json(req): Json<PreemptRequest>,
 ) -> Result<Json<Lease>, Response> {
-    ensure_session(&state.store, &req.session_id, &ctx).await?;
+    ensure_session(&state.pg, &req.session_id, &ctx).await?;
     let locus = locus_or_default(req.locus);
     let ttl = resolve_ttl(req.ttl_ms).map_err(IntoResponse::into_response)?;
 
-    if let Some(old) = LeaseAuthority::active_lease(&state.store, &req.session_id)
+    if let Some(old) = LeaseAuthority::active_lease(&state.kv, &req.session_id)
         .await
         .map_err(store_err)?
     {
         if old.holder_id == ctx.holder_id {
             return Ok(Json(old));
         }
-        let reason = if req.reason.is_empty() {
-            format!("preempted by presence from {}", ctx.holder_id)
-        } else {
-            req.reason.clone()
-        };
-        let store = state.store.clone();
-        let holder = ctx.holder_id.clone();
-        let mut lease = tokio::task::spawn_blocking({
-            let holder = holder.clone();
-            let session_id = req.session_id.clone();
-            let old_id = old.lease_id.clone();
-            move || {
-                store.preempt_lease(&fabric_context::Preemption {
-                    session_id,
-                    old_lease_id: old_id,
-                    new_holder_id: holder.clone(),
-                    new_surface_id: holder,
-                    locus,
-                    ttl_ms: ttl,
-                    reason,
-                })
-            }
-        })
-        .await
-        .map_err(StoreError::from)
-        .map_err(store_err)?
-        .map_err(store_err)?;
-        stamp_granted_by(&state.store, &mut lease, &state.identity)
+        let mut lease = state
+            .kv
+            .preempt(&req.session_id, &ctx.holder_id, locus, ttl)
+            .await
+            .map_err(store_err)?;
+        stamp_granted_by(&state.kv, &mut lease, &state.identity)
             .await
             .map_err(store_err)?;
         info!(
@@ -366,10 +344,10 @@ async fn preempt(
     }
 
     let mut lease =
-        LeaseAuthority::acquire_lease(&state.store, &req.session_id, &ctx.holder_id, locus, ttl)
+        LeaseAuthority::acquire_lease(&state.kv, &req.session_id, &ctx.holder_id, locus, ttl)
             .await
             .map_err(store_err)?;
-    stamp_granted_by(&state.store, &mut lease, &state.identity)
+    stamp_granted_by(&state.kv, &mut lease, &state.identity)
         .await
         .map_err(store_err)?;
     Ok(Json(lease))
@@ -384,21 +362,14 @@ async fn renew(
 ) -> Result<Json<Lease>, Response> {
     let ttl = resolve_ttl(req.ttl_ms).map_err(IntoResponse::into_response)?;
     // Tenancy: the lease's session must belong to the caller's identity.
-    let store = state.store.clone();
-    let lease_id = req.lease_id.clone();
-    let existing = tokio::task::spawn_blocking(move || store.lease(&lease_id))
+    let existing = LeaseAuthority::lease(&state.kv, &req.lease_id)
         .await
-        .map_err(StoreError::from)
-        .map_err(store_err)?
         .map_err(store_err)?;
-    authorize_if_session_exists(&state.store, &existing.session_id, &ctx).await?;
-    let store = state.store.clone();
-    let holder = ctx.holder_id.clone();
-    let lease_id = req.lease_id.clone();
-    let lease = tokio::task::spawn_blocking(move || store.renew_lease(&lease_id, &holder, ttl))
+    authorize_if_session_exists(&state.pg, &existing.session_id, &ctx).await?;
+    let lease = state
+        .kv
+        .renew_lease(&req.lease_id, &ctx.holder_id, ttl)
         .await
-        .map_err(StoreError::from)
-        .map_err(store_err)?
         .map_err(store_err)?;
     Ok(Json(lease))
 }
@@ -411,8 +382,8 @@ async fn release(
     Identity(ctx): Identity,
     Json(req): Json<ReleaseLeaseRequest>,
 ) -> Result<StatusCode, Response> {
-    authorize_if_session_exists(&state.store, &req.session_id, &ctx).await?;
-    LeaseAuthority::release_lease(&state.store, &req.session_id, &ctx.holder_id)
+    authorize_if_session_exists(&state.pg, &req.session_id, &ctx).await?;
+    LeaseAuthority::release_lease(&state.kv, &req.session_id, &ctx.holder_id)
         .await
         .map_err(store_err)?;
     Ok(StatusCode::NO_CONTENT)
@@ -424,8 +395,8 @@ async fn active(
     Identity(ctx): Identity,
     Query(q): Query<ActiveLeaseRequest>,
 ) -> Result<Json<Lease>, Response> {
-    authorize_if_session_exists(&state.store, &q.session_id, &ctx).await?;
-    LeaseAuthority::active_lease(&state.store, &q.session_id)
+    authorize_if_session_exists(&state.pg, &q.session_id, &ctx).await?;
+    LeaseAuthority::active_lease(&state.kv, &q.session_id)
         .await
         .map_err(store_err)?
         .map(Json)
@@ -462,14 +433,70 @@ async fn presence(
     .await
 }
 
+/// A throwaway in-memory replica holding only the replayed entries, fed to
+/// [`fabric_context::reconcile`] as the "remote" side. Reconcile reads only
+/// `entries_since` from the remote; every other method is unreachable from
+/// that path and returns an error.
+struct EntryStaging(Vec<ContextEntry>);
+
+#[async_trait]
+impl ContextStore for EntryStaging {
+    async fn entries_since(
+        &self,
+        session_id: &str,
+        after_seq: u64,
+    ) -> Result<Vec<ContextEntry>, StoreError> {
+        let mut out: Vec<ContextEntry> = self
+            .0
+            .iter()
+            .filter(|e| e.session_id == session_id && e.seq > after_seq)
+            .cloned()
+            .collect();
+        out.sort_by_key(|e| e.seq);
+        Ok(out)
+    }
+
+    async fn append_entry(&self, _entry: &mut ContextEntry) -> Result<u64, StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+    async fn insert_entry_raw(&self, _entry: &ContextEntry) -> Result<(), StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+    async fn entry_by_id(&self, _entry_id: &str) -> Result<Option<ContextEntry>, StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+    async fn entry_at_seq(
+        &self,
+        _session_id: &str,
+        _seq: u64,
+    ) -> Result<Option<ContextEntry>, StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+    async fn head_seq(&self, _session_id: &str) -> Result<u64, StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+    async fn reassign_seq(&self, _entry_id: &str, _new_seq: u64) -> Result<(), StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+    async fn session(&self, _session_id: &str) -> Result<SessionMeta, StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+    async fn set_session_state(&self, _session_id: &str, _state: i32) -> Result<(), StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+    async fn set_disposition(&self, _entry_id: &str, _disposition: &str) -> Result<(), StoreError> {
+        Err(StoreError::Valkey("staging replica is read-only".into()))
+    }
+}
+
 /// Offline-reconnect ingest: an endpoint replays its local op-log after an
 /// offline stretch. Entries were already validated by the endpoint's locus,
-/// so they merge through the deterministic `reconcile` path (same merge as
-/// store-to-store replicas): duplicates skipped, seq collisions resolved by
-/// (received_at, entry_id) — where `received_at` is stamped HERE with the
-/// server clock before merge, never trusted from the client (ADR 006).
-/// Replayed entries are re-evaluated against the current effective policy;
-/// DENY matches are quarantined. Returns the reconcile report.
+/// so they merge through the deterministic `reconcile` path: duplicates
+/// skipped, seq collisions resolved by (received_at, entry_id) — where
+/// `received_at` is stamped HERE with the server clock before merge, never
+/// trusted from the client (ADR 006). Replayed entries are re-evaluated
+/// against the current effective policy; DENY matches are quarantined.
+/// Returns the reconcile report.
 async fn replay(
     State(state): State<Arc<ControlState>>,
     Identity(ctx): Identity,
@@ -477,7 +504,7 @@ async fn replay(
 ) -> Result<Json<ReconcileReport>, Response> {
     // Validate the seq range before touching the store: seq 0 is not a
     // valid op-log position (seqs start at 1) and anything above i64::MAX
-    // cannot be represented in SQLite's INTEGER column.
+    // cannot be represented in Postgres' BIGINT column.
     for entry in &req.entries {
         if entry.seq == 0 || entry.seq > i64::MAX as u64 {
             return Err((
@@ -493,33 +520,14 @@ async fn replay(
         }
     }
 
-    ensure_session(&state.store, &req.session_id, &ctx).await?;
+    ensure_session(&state.pg, &req.session_id, &ctx).await?;
 
     // ADR 006: the server clock is authoritative. Overwrite received_at on
     // every replayed entry BEFORE the merge — a client-supplied value could
     // forge priority in (received_at, entry_id) conflict resolution.
     let received_ms = now_ms();
 
-    // Stage the replayed entries in a throwaway in-memory replica and run
-    // the standard reconcile merge into the authoritative store.
-    let staging = SqliteContextStore::open_in_memory().map_err(store_err)?;
-    let staging_session = SessionMeta {
-        session_id: req.session_id.clone(),
-        soul_id: ctx.soul_id.clone(),
-        user_id: ctx.user_id.clone(),
-        state: SessionState::Active as i32,
-        active_lease: String::new(),
-        created_at: Some(ms_to_timestamp(now_ms())),
-        last_activity: Some(ms_to_timestamp(now_ms())),
-        labels: Default::default(),
-        org_id: ctx.org_id.clone(),
-    };
-    let staging_create = staging.clone();
-    tokio::task::spawn_blocking(move || staging_create.create_session(&staging_session))
-        .await
-        .map_err(StoreError::from)
-        .map_err(store_err)?
-        .map_err(store_err)?;
+    let mut staged: Vec<ContextEntry> = Vec::with_capacity(req.entries.len());
     for entry in &req.entries {
         // created_at is an untrusted endpoint claim: flag insane clocks
         // (pre-2020 or far-future) for the audit log. ADR 006 is
@@ -541,10 +549,9 @@ async fn replay(
         }
         let mut stamped = entry.clone();
         stamped.received_at = Some(ms_to_timestamp(received_ms));
-        ContextStore::insert_entry_raw(&staging, &stamped)
-            .await
-            .map_err(store_err)?;
+        staged.push(stamped);
     }
+    let staging = EntryStaging(staged);
 
     // Re-evaluate replayed entries against the CURRENT effective policy
     // (ADR 006): what was legal under the write-time policy version may now
@@ -556,10 +563,9 @@ async fn replay(
             "no policy loaded; replaying without policy re-evaluation (dev mode)"
         );
     }
-    let report =
-        fabric_context::reconcile(&state.store, &staging, &req.session_id, policy.as_ref())
-            .await
-            .map_err(store_err)?;
+    let report = fabric_context::reconcile(&state.pg, &staging, &req.session_id, policy.as_ref())
+        .await
+        .map_err(store_err)?;
     info!(
         session = %req.session_id,
         applied = report.applied,
@@ -569,734 +575,4 @@ async fn replay(
         "offline op-log replayed"
     );
     Ok(Json(report))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::body::Body;
-    use axum::http::Request;
-    use fabric_types::context::{ContextEntry, EntryKind, ToolCall};
-    use fabric_types::lease::LeaseState;
-    use fabric_types::policy::{ToolAction, ToolRule};
-    use tower::ServiceExt;
-
-    const USER: &str = "user-1";
-
-    fn test_state() -> Arc<ControlState> {
-        let store = SqliteContextStore::open_in_memory().unwrap();
-        let souls = SoulRegistry::open_in_memory().unwrap();
-        ControlState::new(store, souls, "fabric-server-test")
-    }
-
-    /// Request as the default caller: user-1 on device endpoint-1.
-    async fn request(
-        app: &Router,
-        method: &str,
-        uri: &str,
-        body: Option<Value>,
-    ) -> (StatusCode, Value) {
-        request_as(app, method, uri, body, "endpoint-1").await
-    }
-
-    /// Request as user-1 on a specific device.
-    async fn request_as(
-        app: &Router,
-        method: &str,
-        uri: &str,
-        body: Option<Value>,
-        device: &str,
-    ) -> (StatusCode, Value) {
-        request_full(app, method, uri, body, USER, device).await
-    }
-
-    /// Request with an explicit caller identity (the `x-fabric-*` headers
-    /// the middleware resolves; bodies carry no identity claims).
-    async fn request_full(
-        app: &Router,
-        method: &str,
-        uri: &str,
-        body: Option<Value>,
-        user: &str,
-        device: &str,
-    ) -> (StatusCode, Value) {
-        let mut builder = Request::builder()
-            .method(method)
-            .uri(uri)
-            .header("x-fabric-user-sub", user)
-            .header("x-fabric-device-sub", device);
-        let payload = match body {
-            Some(b) => {
-                builder = builder.header("content-type", "application/json");
-                Body::from(b.to_string())
-            }
-            None => Body::empty(),
-        };
-        let res = app
-            .clone()
-            .oneshot(builder.body(payload).unwrap())
-            .await
-            .unwrap();
-        let status = res.status();
-        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let body = if bytes.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&bytes).unwrap()
-        };
-        (status, body)
-    }
-
-    fn expires_ms(lease: &Value) -> i64 {
-        // pbjson serializes timestamps as RFC3339 strings; compare via the
-        // store instead. Here we only need ordering, so parse through
-        // pbjson_types.
-        let ts: pbjson_types::Timestamp =
-            serde_json::from_value(lease["expiresAt"].clone()).unwrap();
-        ts.seconds * 1000 + i64::from(ts.nanos) / 1_000_000
-    }
-
-    fn entry_json(id: &str, session: &str, seq: u64, created_ms: i64) -> Value {
-        serde_json::to_value(ContextEntry {
-            entry_id: id.into(),
-            session_id: session.into(),
-            seq,
-            kind: EntryKind::UserMessage as i32,
-            payload: b"hello".to_vec(),
-            lease_holder: "endpoint-1".into(),
-            policy_version: String::new(),
-            locus: Locus::Endpoint as i32,
-            created_at: Some(pbjson_types::Timestamp {
-                seconds: created_ms / 1000,
-                nanos: ((created_ms % 1000) * 1_000_000) as i32,
-            }),
-            received_at: None,
-            disposition: String::new(),
-        })
-        .unwrap()
-    }
-
-    #[tokio::test]
-    async fn acquire_active_renew_preempt_release_cycle() {
-        let state = test_state();
-        let app = router(Arc::clone(&state));
-
-        // Acquire: the server stamps identity + timestamps; the holder is
-        // the caller's device identity, not a body field.
-        let (code, lease) = request(
-            &app,
-            "POST",
-            "/lease/acquire",
-            Some(json!({
-                "session_id": "s1",
-                "locus": "LOCUS_ENDPOINT",
-                "ttl_ms": 60_000,
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{lease}");
-        assert_eq!(lease["holderId"], "endpoint-1");
-        assert_eq!(lease["grantedBy"], "fabric-server-test");
-        assert_eq!(lease["state"], "LEASE_STATE_ACTIVE");
-        let lease_id = lease["leaseId"].as_str().unwrap().to_string();
-        let first_expiry = expires_ms(&lease);
-
-        // The server clock stamped granted_at — within the last minute.
-        let granted: pbjson_types::Timestamp =
-            serde_json::from_value(lease["grantedAt"].clone()).unwrap();
-        let granted_ms = granted.seconds * 1000;
-        assert!((now_ms() - granted_ms).abs() < 60_000);
-
-        // A competing raw acquire from the same user's other device
-        // conflicts: preemption is the only way in.
-        let (code, body) = request_as(
-            &app,
-            "POST",
-            "/lease/acquire",
-            Some(json!({
-                "session_id": "s1",
-                "locus": "LOCUS_SERVER",
-                "ttl_ms": 60_000,
-            })),
-            "web-1",
-        )
-        .await;
-        assert_eq!(code, StatusCode::CONFLICT, "{body}");
-
-        // Active: returns the holder's lease.
-        let (code, active_lease) = request(&app, "GET", "/lease/active?session_id=s1", None).await;
-        assert_eq!(code, StatusCode::OK);
-        assert_eq!(active_lease["leaseId"], lease_id);
-        assert_eq!(active_lease["grantedBy"], "fabric-server-test");
-
-        // Renew: holder (device identity) matches, expiry extends.
-        let (code, renewed) = request(
-            &app,
-            "POST",
-            "/lease/renew",
-            Some(json!({
-                "lease_id": lease_id,
-                "ttl_ms": 120_000,
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{renewed}");
-        assert!(expires_ms(&renewed) > first_expiry);
-
-        // Renew from a different device is rejected.
-        let (code, _) = request_as(
-            &app,
-            "POST",
-            "/lease/renew",
-            Some(json!({
-                "lease_id": lease_id,
-                "ttl_ms": 120_000,
-            })),
-            "mallory",
-        )
-        .await;
-        assert_eq!(code, StatusCode::FORBIDDEN);
-
-        // Preempt: user moved to the web surface. Presence wins the lease.
-        let (code, new_lease) = request_as(
-            &app,
-            "POST",
-            "/lease/preempt",
-            Some(json!({
-                "session_id": "s1",
-                "reason": "user active on web",
-                "locus": "LOCUS_SERVER",
-            })),
-            "web-1",
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{new_lease}");
-        assert_eq!(new_lease["holderId"], "web-1");
-        assert_eq!(new_lease["grantedBy"], "fabric-server-test");
-        assert_ne!(new_lease["leaseId"], lease_id);
-
-        // Audit: the old lease is REVOKED and records who preempted it.
-        let old = state.store.lease(&lease_id).unwrap();
-        assert_eq!(old.state, LeaseState::Revoked as i32);
-        assert_eq!(old.preempted_by, "web-1");
-
-        // Active now reports the web surface.
-        let (code, active_lease) = request(&app, "GET", "/lease/active?session_id=s1", None).await;
-        assert_eq!(code, StatusCode::OK);
-        assert_eq!(active_lease["holderId"], "web-1");
-
-        // Preempting from the current holder's device is a no-op.
-        let (code, same) = request_as(
-            &app,
-            "POST",
-            "/lease/preempt",
-            Some(json!({ "session_id": "s1" })),
-            "web-1",
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK);
-        assert_eq!(same["leaseId"], new_lease["leaseId"]);
-
-        // Release by a non-holder is rejected.
-        let (code, _) = request(
-            &app,
-            "DELETE",
-            "/lease/release",
-            Some(json!({ "session_id": "s1" })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::FORBIDDEN);
-
-        // Release by the holder: 204, then no active lease.
-        let (code, _) = request_as(
-            &app,
-            "DELETE",
-            "/lease/release",
-            Some(json!({ "session_id": "s1" })),
-            "web-1",
-        )
-        .await;
-        assert_eq!(code, StatusCode::NO_CONTENT);
-        let (code, _) = request(&app, "GET", "/lease/active?session_id=s1", None).await;
-        assert_eq!(code, StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn acquire_and_renew_reject_out_of_range_ttl() {
-        let app = router(test_state());
-
-        for ttl in [0, -5, MAX_LEASE_TTL_MS + 1] {
-            let (code, body) = request(
-                &app,
-                "POST",
-                "/lease/acquire",
-                Some(json!({
-                    "session_id": "s1",
-                    "ttl_ms": ttl,
-                })),
-            )
-            .await;
-            assert_eq!(code, StatusCode::BAD_REQUEST, "ttl {ttl}: {body}");
-        }
-
-        // Acquire a lease with a valid TTL, then renew with bad ones.
-        let (code, lease) = request(
-            &app,
-            "POST",
-            "/lease/acquire",
-            Some(json!({
-                "session_id": "s1",
-                "ttl_ms": 60_000,
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{lease}");
-        let lease_id = lease["leaseId"].as_str().unwrap();
-
-        for ttl in [0, -1, MAX_LEASE_TTL_MS + 1] {
-            let (code, body) = request(
-                &app,
-                "POST",
-                "/lease/renew",
-                Some(json!({
-                    "lease_id": lease_id,
-                    "ttl_ms": ttl,
-                })),
-            )
-            .await;
-            assert_eq!(code, StatusCode::BAD_REQUEST, "ttl {ttl}: {body}");
-        }
-
-        // Boundary value: exactly MAX_LEASE_TTL_MS is accepted.
-        let (code, body) = request(
-            &app,
-            "POST",
-            "/lease/renew",
-            Some(json!({
-                "lease_id": lease_id,
-                "ttl_ms": MAX_LEASE_TTL_MS,
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{body}");
-    }
-
-    #[tokio::test]
-    async fn presence_from_new_surface_preempts_lease() {
-        let app = router(test_state());
-
-        let (code, lease) = request(
-            &app,
-            "POST",
-            "/lease/acquire",
-            Some(json!({
-                "session_id": "s1",
-                "locus": "LOCUS_ENDPOINT",
-                "ttl_ms": 60_000,
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK);
-
-        // Presence from the holder's own device: no-op, same lease.
-        let (code, same) = request(
-            &app,
-            "POST",
-            "/presence",
-            Some(json!({ "session_id": "s1" })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK);
-        assert_eq!(same["leaseId"], lease["leaseId"]);
-
-        // Presence from the web client: latest activity wins the lease.
-        let (code, new_lease) = request_as(
-            &app,
-            "POST",
-            "/presence",
-            Some(json!({
-                "session_id": "s1",
-                "locus": "LOCUS_SERVER",
-            })),
-            "web-1",
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{new_lease}");
-        assert_eq!(new_lease["holderId"], "web-1");
-        assert_ne!(new_lease["leaseId"], lease["leaseId"]);
-    }
-
-    #[tokio::test]
-    async fn replay_merges_offline_entries_deterministically() {
-        let state = test_state();
-        let app = router(Arc::clone(&state));
-
-        // First replay: both entries apply cleanly.
-        let (code, report) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({
-                "session_id": "s1",
-                "entries": [entry_json("e1", "s1", 1, 1_000), entry_json("e2", "s1", 2, 2_000)],
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{report}");
-        assert_eq!(report["applied"], 2);
-        assert_eq!(report["duplicates"], 0);
-
-        // Replaying the same entries is idempotent.
-        let (code, report) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({
-                "session_id": "s1",
-                "entries": [entry_json("e1", "s1", 1, 1_000), entry_json("e2", "s1", 2, 2_000)],
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK);
-        assert_eq!(report["applied"], 0);
-        assert_eq!(report["duplicates"], 2);
-
-        // A diverged offline entry at a contested seq merges
-        // deterministically: e3 loses to e2 on (received_at, entry_id) —
-        // both were server-stamped at ingest — and moves to the tail.
-        let (code, report) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({
-                "session_id": "s1",
-                "entries": [entry_json("e1", "s1", 1, 1_000), entry_json("e3", "s1", 2, 3_000)],
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{report}");
-        assert_eq!(report["duplicates"], 1);
-        assert_eq!(report["conflicts"].as_array().unwrap().len(), 1);
-        let entries = ContextStore::entries_since(&state.store, "s1", 0)
-            .await
-            .unwrap();
-        let ids: Vec<&str> = entries.iter().map(|e| e.entry_id.as_str()).collect();
-        assert_eq!(ids, ["e1", "e2", "e3"]);
-    }
-
-    #[tokio::test]
-    async fn replay_rejects_out_of_range_seq() {
-        let state = test_state();
-        let app = router(Arc::clone(&state));
-
-        // seq 0 is not a valid op-log position.
-        let (code, body) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({
-                "session_id": "s1",
-                "entries": [entry_json("e0", "s1", 0, 1_000)],
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
-        assert!(body["error"].as_str().unwrap().contains("seq"));
-
-        // seq beyond i64::MAX cannot be stored in SQLite's INTEGER column.
-        let (code, body) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({
-                "session_id": "s1",
-                "entries": [entry_json("emax", "s1", u64::MAX, 1_000)],
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
-
-        // Nothing was staged or merged.
-        assert!(ContextStore::entries_since(&state.store, "s1", 0)
-            .await
-            .unwrap()
-            .is_empty());
-    }
-
-    #[tokio::test]
-    async fn replay_accepts_insane_created_at_with_a_warning() {
-        let state = test_state();
-        let app = router(Arc::clone(&state));
-
-        // ADR 006 is "accept everything": an entry created in the year 2099
-        // (endpoint clock garbage) is still merged — the server-stamped
-        // received_at carries the ordering, so the claim is harmless. The
-        // handler logs a warning; the merge must not panic or reject.
-        let future_ms = 4_070_889_600_000; // 2099-01-01T00:00:00Z
-        let (code, report) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({
-                "session_id": "s1",
-                "entries": [entry_json("future", "s1", 1, future_ms)],
-            })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{report}");
-        assert_eq!(report["applied"], 1);
-
-        let stored = state.store.entry_by_id("future").unwrap().unwrap();
-        assert_eq!(
-            stored.created_at.as_ref().unwrap().seconds,
-            future_ms / 1000,
-            "created_at is preserved verbatim (untrusted claim, audit only)"
-        );
-    }
-
-    #[tokio::test]
-    async fn identity_headers_required_on_all_routes_except_healthz() {
-        let app = router(test_state());
-
-        // No identity headers: every protected route rejects with 400.
-        for (method, uri) in [
-            ("POST", "/lease/acquire"),
-            ("POST", "/lease/preempt"),
-            ("POST", "/lease/renew"),
-            ("DELETE", "/lease/release"),
-            ("GET", "/lease/active?session_id=s1"),
-            ("POST", "/presence"),
-            ("POST", "/context/replay"),
-            ("GET", "/identity"),
-        ] {
-            let req = Request::builder()
-                .method(method)
-                .uri(uri)
-                .header("content-type", "application/json")
-                .body(Body::from("{}"))
-                .unwrap();
-            let res = app.clone().oneshot(req).await.unwrap();
-            assert_eq!(
-                res.status(),
-                StatusCode::BAD_REQUEST,
-                "{method} {uri} must reject requests without identity headers"
-            );
-        }
-
-        // The liveness probe stays unauthenticated.
-        let req = Request::builder()
-            .method("GET")
-            .uri("/healthz")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn session_is_bound_to_the_creating_identity() {
-        let state = test_state();
-        let app = router(Arc::clone(&state));
-
-        // user-a creates the session by acquiring the first lease.
-        let (code, _) = request_full(
-            &app,
-            "POST",
-            "/lease/acquire",
-            Some(json!({ "session_id": "s1", "ttl_ms": 60_000 })),
-            "user-a",
-            "dev-a",
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK);
-
-        // The session row is bound to user-a's identity and org.
-        let session = state.store.session("s1").unwrap();
-        assert_eq!(session.user_id, "user-a");
-        assert_eq!(session.org_id, "default");
-        assert!(!session.soul_id.is_empty());
-
-        // user-b cannot acquire, preempt, release, replay, or even READ the
-        // active lease on user-a's session.
-        for (method, uri, body) in [
-            (
-                "POST",
-                "/lease/acquire",
-                json!({ "session_id": "s1", "ttl_ms": 60_000 }),
-            ),
-            ("POST", "/lease/preempt", json!({ "session_id": "s1" })),
-            ("DELETE", "/lease/release", json!({ "session_id": "s1" })),
-            (
-                "POST",
-                "/context/replay",
-                json!({ "session_id": "s1", "entries": [] }),
-            ),
-        ] {
-            let (code, body) = request_full(&app, method, uri, Some(body), "user-b", "dev-b").await;
-            assert_eq!(code, StatusCode::FORBIDDEN, "{method} {uri}: {body}");
-        }
-        let (code, _) = request_full(
-            &app,
-            "GET",
-            "/lease/active?session_id=s1",
-            None,
-            "user-b",
-            "dev-b",
-        )
-        .await;
-        assert_eq!(code, StatusCode::FORBIDDEN);
-
-        // user-a's OTHER device is fine: tenancy is per user+org, not per
-        // device (device switch is the whole point of the fabric).
-        let (code, lease) = request_full(
-            &app,
-            "POST",
-            "/lease/preempt",
-            Some(json!({ "session_id": "s1" })),
-            "user-a",
-            "dev-a2",
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{lease}");
-        assert_eq!(lease["holderId"], "dev-a2");
-    }
-
-    #[tokio::test]
-    async fn replay_restamps_received_at_with_the_server_clock() {
-        let state = test_state();
-        let app = router(Arc::clone(&state));
-
-        // A forged received_at (1970) would win every conflict resolution
-        // if the server trusted it. ADR 006: the server clock is
-        // authoritative; the client claim is overwritten before merge.
-        let mut forged = entry_json("forged", "s1", 1, 1_000);
-        forged["receivedAt"] = serde_json::to_value(pbjson_types::Timestamp {
-            seconds: 0,
-            nanos: 1_000_000,
-        })
-        .unwrap();
-        let before = now_ms();
-        let (code, report) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({ "session_id": "s1", "entries": [forged] })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{report}");
-        assert_eq!(report["applied"], 1);
-
-        let stored = ContextStore::entries_since(&state.store, "s1", 0)
-            .await
-            .unwrap()
-            .pop()
-            .unwrap();
-        let stamped = stored.received_at.as_ref().unwrap();
-        let stamped_ms = stamped.seconds * 1000 + i64::from(stamped.nanos) / 1_000_000;
-        assert_ne!(stamped_ms, 1, "client-supplied received_at was trusted");
-        assert!(
-            (before..=now_ms() + 5_000).contains(&stamped_ms),
-            "received_at must be server-stamped at ingest: {stamped_ms}"
-        );
-    }
-
-    fn deny_policy(pattern: &str) -> EndpointPolicy {
-        EndpointPolicy {
-            policy_id: "p1".into(),
-            version: "v1".into(),
-            org_id: String::new(),
-            data_rules: vec![],
-            tool_rules: vec![ToolRule {
-                tool_pattern: pattern.into(),
-                action: ToolAction::Deny as i32,
-                condition: String::new(),
-            }],
-            model_rules: vec![],
-            cua: None,
-            kill_switch: false,
-            max_retention_hours: 0,
-            dlp_patterns: vec![],
-            safety: None,
-        }
-    }
-
-    fn tool_call_entry_json(id: &str, session: &str, seq: u64, tool: &str, target: &str) -> Value {
-        serde_json::to_value(ContextEntry {
-            entry_id: id.into(),
-            session_id: session.into(),
-            seq,
-            kind: EntryKind::ToolCall as i32,
-            payload: fabric_context::tool_call::encode(&ToolCall {
-                tool_name: tool.into(),
-                target: target.into(),
-                params: Default::default(),
-                idempotency_key: String::new(),
-            }),
-            lease_holder: "endpoint-1".into(),
-            policy_version: String::new(),
-            locus: Locus::Endpoint as i32,
-            created_at: Some(pbjson_types::Timestamp {
-                seconds: 1,
-                nanos: 0,
-            }),
-            received_at: None,
-            disposition: String::new(),
-        })
-        .unwrap()
-    }
-
-    #[tokio::test]
-    async fn replay_reevaluates_entries_against_current_policy() {
-        let state = test_state();
-        state.set_policy(deny_policy("shell.*"));
-        let app = router(Arc::clone(&state));
-
-        // The endpoint executed shell.exec while offline under an older
-        // policy; the current policy denies it. Re-evaluated on replay, the
-        // entry is preserved but QUARANTINED (ADR 006).
-        let denied = tool_call_entry_json("denied-call", "s1", 1, "shell.exec", "/etc");
-
-        let (code, report) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({ "session_id": "s1", "entries": [denied] })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{report}");
-        assert_eq!(report["applied"], 1);
-        let violations = report["policy_violations"].as_array().unwrap();
-        assert_eq!(violations.len(), 1);
-        assert_eq!(violations[0]["entry_id"], "denied-call");
-        assert_eq!(violations[0]["rule"], "shell.*");
-
-        let stored = state.store.entry_by_id("denied-call").unwrap().unwrap();
-        assert_eq!(
-            stored.disposition,
-            fabric_context::reconcile::DISPOSITION_QUARANTINE
-        );
-    }
-
-    #[tokio::test]
-    async fn replay_without_policy_loaded_merges_without_quarantine() {
-        let state = test_state();
-        let app = router(Arc::clone(&state));
-
-        let denied = tool_call_entry_json("denied-call", "s1", 1, "shell.exec", "/etc");
-
-        let (code, report) = request(
-            &app,
-            "POST",
-            "/context/replay",
-            Some(json!({ "session_id": "s1", "entries": [denied] })),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "{report}");
-        assert_eq!(report["applied"], 1);
-        assert_eq!(report["policy_violations"].as_array().unwrap().len(), 0);
-        let stored = state.store.entry_by_id("denied-call").unwrap().unwrap();
-        assert_eq!(stored.disposition, "");
-    }
 }

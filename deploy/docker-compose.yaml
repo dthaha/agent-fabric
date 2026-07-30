@@ -1,0 +1,39 @@
+# Dev provisioning for the server control plane (ADR 004): Postgres op-log +
+# Valkey (RESP) lease authority. There is no SQLite fallback for the server —
+# dev and prod run the same store semantics.
+#
+#   docker compose -f deploy/docker-compose.yaml up -d
+#
+# Then point the control plane at:
+#   FABRIC_PG_URL=postgres://fabric:fabric@localhost:5432/fabric
+#   FABRIC_KV_URL=redis://localhost:6379
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: fabric
+      POSTGRES_USER: fabric
+      POSTGRES_PASSWORD: fabric
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fabric -d fabric"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

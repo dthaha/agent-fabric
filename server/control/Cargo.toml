@@ -5,20 +5,32 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# ADR 004: the Postgres op-log + Valkey lease authority live behind this
+# feature so the endpoint (which never links `fabric-control`) stays lean.
+# Enabled by default for the server; production builds always carry it.
+default = ["server-store"]
+server-store = ["dep:sqlx", "dep:fred"]
+
 [dependencies]
 fabric-context = { path = "../../core/context" }
 fabric-telemetry = { path = "../../core/telemetry" }
 fabric-types = { path = "../../core/types" }
 anyhow.workspace = true
+async-trait.workspace = true
 axum.workspace = true
-rusqlite.workspace = true
+pbjson-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+# Server backends (ADR 004). Optional so `--no-default-features` can build a
+# stub server without the Postgres/Valkey crates; the endpoint never pulls
+# this crate in and so never compiles them.
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "migrate"], optional = true }
+fred = { version = "10.1.0", features = ["i-keys", "i-scripts"], optional = true }
 
 [dev-dependencies]
-pbjson-types.workspace = true
 tower = { version = "0.5", features = ["util"] }
