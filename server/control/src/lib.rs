@@ -17,14 +17,10 @@ use std::sync::Arc;
 pub mod identity;
 pub mod soul;
 
-#[cfg(feature = "server-store")]
 pub mod pg_store;
-#[cfg(feature = "server-store")]
 pub mod valkey_lease;
 
-#[cfg(feature = "server-store")]
 pub use pg_store::PostgresContextStore;
-#[cfg(feature = "server-store")]
 pub use valkey_lease::ValkeyLeaseAuthority;
 
 use axum::extract::{Query, State};

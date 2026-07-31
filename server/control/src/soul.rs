@@ -6,8 +6,6 @@
 //! IdP/MDM; the `devices` table here is only a *cache* of IdP-enrolled devices
 //! that have talked to the server, revocable by admins.
 
-#![cfg(feature = "server-store")]
-
 use sqlx::postgres::{PgPool, PgRow};
 use sqlx::{query, Row};
 

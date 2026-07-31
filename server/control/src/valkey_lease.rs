@@ -23,8 +23,6 @@
 //!   colon (`!NOTHOLDER:<current holder>`) so the Rust side can map them onto
 //!   the shared [`StoreError`] with meaningful context.
 
-#![cfg(feature = "server-store")]
-
 use async_trait::async_trait;
 use fred::clients::Client as RedisClient;
 use fred::prelude::*;

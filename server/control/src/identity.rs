@@ -156,9 +156,3 @@ mod tests {
         assert_eq!(resolve_org(None, None), "default");
     }
 }
-
-#[cfg(all(test, feature = "server-store"))]
-mod server_tests {
-    // The full-extractor tests require Postgres + Valkey (FABRIC_PG_URL +
-    // FABRIC_KV_URL) and live in the workspace's ignored integration tests.
-}

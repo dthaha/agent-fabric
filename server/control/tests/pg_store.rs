@@ -5,8 +5,6 @@
 //! Each test uses a unique session id so concurrent runs share the public
 //! schema without clashing (the init migration is idempotent).
 
-#![cfg(feature = "server-store")]
-
 use fabric_context::store::ContextStore;
 use fabric_types::context::{ContextEntry, EntryKind, Locus, SessionMeta, SessionState};
 

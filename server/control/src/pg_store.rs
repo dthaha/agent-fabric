@@ -11,8 +11,6 @@
 //! cross-store transaction; the lease is the gate, exactly as on the endpoint,
 //! and the op-log trusts the caller once past it.
 
-#![cfg(feature = "server-store")]
-
 use async_trait::async_trait;
 use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
 use sqlx::{query, Row};

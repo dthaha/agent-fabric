@@ -5,8 +5,6 @@
 //! index bookkeeping. Behavioral coverage (acquire/conflict/renew/release/
 //! preempt/TTL) lives in the ignored integration tests against a live Valkey.
 
-#![cfg(feature = "server-store")]
-
 use fabric_control::valkey_lease::{
     ACQUIRE, PREEMPT, RELEASE, RENEW, SET_GRANTED_BY, SET_GRANTED_SEQ, TRANSFER,
 };

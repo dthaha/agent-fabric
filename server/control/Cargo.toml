@@ -5,13 +5,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[features]
-# ADR 004: the Postgres op-log + Valkey lease authority live behind this
-# feature so the endpoint (which never links `fabric-control`) stays lean.
-# Enabled by default for the server; production builds always carry it.
-default = ["server-store"]
-server-store = ["dep:sqlx", "dep:fred"]
-
 [dependencies]
 fabric-context = { path = "../../core/context" }
 fabric-telemetry = { path = "../../core/telemetry" }
@@ -26,11 +19,12 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-# Server backends (ADR 004). Optional so `--no-default-features` can build a
-# stub server without the Postgres/Valkey crates; the endpoint never pulls
-# this crate in and so never compiles them.
-sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "migrate"], optional = true }
-fred = { version = "10.1.0", features = ["i-keys", "i-scripts"], optional = true }
+# Server backends (ADR 004). Non-optional: this crate IS the Postgres+Valkey
+# control plane — there is no stub configuration. The endpoint stays lean by
+# never depending on this crate (only its integration tests do, as a
+# dev-dependency), not via a feature flag.
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "migrate"] }
+fred = { version = "10.1.0", features = ["i-keys", "i-scripts"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

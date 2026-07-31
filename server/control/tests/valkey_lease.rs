@@ -2,8 +2,6 @@
 //! `#[ignore]`'d — they require a live RESP-compatible server (Valkey
 //! recommended) reachable via `FABRIC_KV_URL`.
 
-#![cfg(feature = "server-store")]
-
 use std::time::Duration;
 
 use fabric_context::store::LeaseAuthority;
