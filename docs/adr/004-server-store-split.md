@@ -143,24 +143,24 @@ code changes.
 ### Configuration
 
 ```toml
-# fabric-control config
+# fabric-control config — both are REQUIRED, no fallback
 [store]
-# Lease authority
-kv_url = "redis://valkey:6379"      # RESP endpoint (Valkey recommended)
+# Lease authority (Valkey recommended, any RESP-compatible server works)
+kv_url = "redis://valkey:6379"
 kv_pool_size = 8
 
-# Op-log
+# Op-log (Postgres)
 pg_url = "postgres://fabric:***@postgres:5432/fabric"
 pg_pool_size = 16
-
-# Dev/test fallback (single-node, no external deps)
-# sqlite_path = "/var/lib/fabric/control.db"
 ```
 
-When `sqlite_path` is set and `kv_url`/`pg_url` are absent, the server
-falls back to `SqliteContextStore` for everything (dev mode, single-node
-deployments, CI). This preserves the "single static binary, no runtime
-deps" property for simple deployments.
+There is no SQLite fallback for the server. Postgres and Valkey are
+fundamentally different beasts from SQLite — different concurrency models,
+different failure modes, different operational characteristics. Blessing
+SQLite as a dev path means the server is never tested against the semantics
+it will actually run under. Dev environments run Postgres + Valkey via
+docker-compose or testcontainers. The endpoint keeps SQLite (embedded,
+offline, correct for that role).
 
 ### Future considerations
 
@@ -185,9 +185,9 @@ deps" property for simple deployments.
 - `Cargo.toml` gains `fred` (or `redis-rs`) and `tokio-postgres` (or
   `sqlx`) as optional deps behind a `server-store` feature flag.
 - Deploy manifests (Helm, docker-compose) add Valkey and Postgres services.
-- CI tests use `SqliteContextStore` fallback (no external services needed).
-- Integration tests for Valkey/Postgres impls run in a separate CI job
-  with service containers.
+- CI and dev use `testcontainers-rs` to spin up real Postgres + Valkey.
+  There is no SQLite fallback for the server — dev and prod run the same
+  store semantics.
 
 ## References
 
