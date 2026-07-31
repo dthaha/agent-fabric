@@ -91,7 +91,7 @@ sdk/                published packages
   fabric-tools/     tool bridge client SDK
   fabric-policy/    embeddable policy eval lib
 admin/              admin console (TypeScript web app)
-docs/               ADRs, API reference, guides
+docs/               ADRs, operations runbook, API reference, guides
 deploy/             helm, docker, terraform
 tests/              integration + e2e (continuity, offline, policy, cua)
 ```

@@ -65,7 +65,7 @@ server/             server-side runtime (k8s/docker/VM)
 harness/            first-party reference agent (TypeScript)
 sdk/                published packages
 admin/              admin console (TypeScript web app)
-docs/               ADRs, API reference, guides
+docs/               ADRs, operations runbook, API reference, guides
 deploy/             helm, docker, terraform
 tests/              integration + e2e
 ```
@@ -79,6 +79,14 @@ make server     # docker build -f deploy/docker/Dockerfile.server
 make test       # cargo test --workspace
 make check      # clippy + fmt
 ```
+
+## Running the server
+
+The control plane needs two backends: **Postgres** (the authoritative op-log)
+and **Valkey** (the ephemeral lease authority). They are operated very
+differently — Postgres is the data you protect, Valkey is disposable by
+design. See [docs/operations.md](docs/operations.md) for pool sizing, TLS/auth
+hardening, backup/PITR, and the dev-compose-vs-production gap.
 
 ## Safety pipeline
 
