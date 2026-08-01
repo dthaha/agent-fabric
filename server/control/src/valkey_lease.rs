@@ -517,3 +517,115 @@ impl fabric_context::store::LeaseAuthority for ValkeyLeaseAuthority {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Lua-script contract tests (ADR 004). These run without a Valkey server:
+// they assert the `const` scripts are well-formed and atomic-shaped.
+// Behavioral coverage lives in tests/integration.rs (ignored, needs live KV).
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod lua_script_contract {
+    use super::{ACQUIRE, PREEMPT, RELEASE, RENEW, SET_GRANTED_BY, SET_GRANTED_SEQ, TRANSFER};
+
+    fn assert_error_convention(title: &str, script: &str, sentinel: &str) {
+        assert!(
+            script.contains(sentinel),
+            "{title}: script must return the `{sentinel}` sentinel"
+        );
+    }
+
+    #[test]
+    fn acquire_is_atomic_setnx_plus_reverse_index() {
+        assert_error_convention("acquire", ACQUIRE, "!CONFLICT");
+        assert!(ACQUIRE.contains("'NX'"), "acquire must use SET NX (atomic)");
+        assert!(ACQUIRE.contains("'PX'"), "acquire must stamp a TTL");
+        assert!(ACQUIRE.contains("KEYS[2]"));
+    }
+
+    #[test]
+    fn release_is_verify_then_del_and_idempotent() {
+        assert!(
+            RELEASE.contains("if not v then return nil end"),
+            "release must be idempotent"
+        );
+        assert_error_convention("release", RELEASE, "!NOTHOLDER");
+        assert!(RELEASE.contains("'DEL'"), "release must delete the lease");
+        assert!(
+            RELEASE.contains("leaseid:"),
+            "release must drop the reverse index"
+        );
+    }
+
+    #[test]
+    fn renew_verifies_holder_and_refreshes_ttl() {
+        assert_error_convention("renew", RENEW, "!NOLEASE");
+        assert_error_convention("renew", RENEW, "!NOTHOLDER");
+        assert!(RENEW.contains("'PX'"), "renew must refresh the TTL");
+        assert!(
+            RENEW.contains("'PEXPIRE'"),
+            "renew must refresh the reverse index TTL"
+        );
+        assert!(
+            RENEW.contains("expires_at_ms"),
+            "renew must rewrite the expiry in JSON"
+        );
+    }
+
+    #[test]
+    fn preempt_is_same_holder_noop_otherwise_revokes_and_regrants() {
+        assert!(
+            PREEMPT.contains("j.holder_id == ARGV[4] then return v end"),
+            "preempt from the current holder is a no-op"
+        );
+        assert!(
+            PREEMPT.contains("DEL"),
+            "preempt must revoke the old reverse index"
+        );
+        assert!(PREEMPT.contains("'PX'"), "preempt must grant with a TTL");
+    }
+
+    #[test]
+    fn transfer_lease_is_atomic_release_plus_grant() {
+        assert_error_convention("transfer", TRANSFER, "!NOLEASE");
+        assert_error_convention("transfer", TRANSFER, "!NOTHOLDER");
+        assert!(
+            TRANSFER.contains("'DEL'"),
+            "transfer must drop the old reverse index"
+        );
+        assert!(
+            TRANSFER.matches("'SET'").count() == 2,
+            "transfer set lease + reverse index"
+        );
+    }
+
+    #[test]
+    fn set_granted_seq_and_granted_by_preserve_ttl() {
+        assert!(
+            SET_GRANTED_SEQ.contains("'KEEPTTL'"),
+            "set_granted_seq must preserve TTL"
+        );
+        assert!(
+            SET_GRANTED_BY.contains("'KEEPTTL'"),
+            "set_granted_by must preserve TTL"
+        );
+    }
+
+    #[test]
+    fn scripts_reference_keys_and_argv_only() {
+        for (name, script) in [
+            ("acquire", ACQUIRE),
+            ("release", RELEASE),
+            ("renew", RENEW),
+            ("preempt", PREEMPT),
+            ("transfer", TRANSFER),
+            ("set_granted_seq", SET_GRANTED_SEQ),
+            ("set_granted_by", SET_GRANTED_BY),
+        ] {
+            assert!(
+                !script.contains("lease:") && !script.contains("leaseid:{"),
+                "{name}: must not hard-code session/lease keys (use KEYS[])"
+            );
+        }
+    }
+}

@@ -1,0 +1,14 @@
+[build]
+# Incremental compilation wastes 1.5GB+ and provides no benefit when
+# rebuilding the whole workspace (CI-style). Disable it.
+incremental = false
+
+[profile.dev]
+# line-tables-only keeps backtraces useful while cutting debug info ~60%.
+debug = "line-tables-only"
+
+[profile.test]
+# Test binaries don't need debug info at all — they're throwaway links.
+debug = 0
+# Strip symbols from test binaries to shrink the 215MB endpoint test bin.
+strip = "symbols"
