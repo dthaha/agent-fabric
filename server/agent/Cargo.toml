@@ -11,15 +11,25 @@ path = "src/main.rs"
 
 [dependencies]
 fabric-context = { path = "../../core/context" }
+fabric-control = { path = "../control" }
 fabric-policy = { path = "../../core/policy" }
 fabric-telemetry = { path = "../../core/telemetry" }
+fabric-types = { path = "../../core/types" }
 anyhow.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true
+k8s-openapi.workspace = true
+kube = { workspace = true, features = ["runtime", "derive"] }
+# Same Postgres stack as the control plane (ADR 004): task records live in
+# the same database as the op-log.
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "migrate", "chrono"] }
 
 [features]
 default = ["core"]

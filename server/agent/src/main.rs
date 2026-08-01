@@ -3,7 +3,10 @@
 //! tools over the authenticated bridge. Leased with the context plane.
 
 use anyhow::{Context, Result};
-use tracing::info;
+use fabric_control::ValkeyLeaseAuthority;
+use fabric_server::job_spec::{self, JobSpecConfig};
+use fabric_server::AgentTaskOrchestrator;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,12 +16,51 @@ async fn main() -> Result<()> {
     })
     .context("initializing telemetry")?;
 
-    info!("fabric-server starting (agent loop server lands in a later phase)");
+    match init_orchestrator().await {
+        Ok(Some(_orchestrator)) => info!("agent task orchestrator ready"),
+        Ok(None) => info!("FABRIC_PG_URL/FABRIC_KV_URL unset; orchestrator disabled (dev mode)"),
+        Err(e) => warn!(error = %e, "orchestrator init failed; running without it"),
+    }
 
     wait_for_shutdown_signal().await;
     info!("shutdown complete");
     telemetry.shutdown().context("shutting down telemetry")?;
     Ok(())
+}
+
+/// Build the task orchestrator from env config. `Ok(None)` when the
+/// Postgres/Valkey URLs are not configured (local dev without the server
+/// backends).
+async fn init_orchestrator() -> Result<Option<AgentTaskOrchestrator<ValkeyLeaseAuthority>>> {
+    let (Ok(pg_url), Ok(kv_url)) = (
+        std::env::var("FABRIC_PG_URL"),
+        std::env::var("FABRIC_KV_URL"),
+    ) else {
+        return Ok(None);
+    };
+
+    let pool = sqlx::PgPool::connect(&pg_url)
+        .await
+        .context("connecting to Postgres")?;
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .context("running agent task migrations")?;
+    let leases = ValkeyLeaseAuthority::connect(&kv_url)
+        .await
+        .context("connecting to Valkey")?;
+    let kube = kube::Client::try_default()
+        .await
+        .context("creating kube client")?;
+
+    let namespace = std::env::var("FABRIC_K8S_NAMESPACE")
+        .unwrap_or_else(|_| job_spec::DEFAULT_NAMESPACE.into());
+    let spec = JobSpecConfig {
+        namespace,
+        pg_url,
+        kv_url,
+    };
+    Ok(Some(AgentTaskOrchestrator::new(kube, leases, pool, spec)))
 }
 
 /// Block until SIGINT (ctrl-c) or SIGTERM arrives.
