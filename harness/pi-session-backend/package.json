@@ -1,0 +1,28 @@
+{
+  "name": "@fabric/pi-session-backend",
+  "version": "0.1.0",
+  "description": "Pi SessionStore implementation backed by the Agent Fabric spine via the local endpoint daemon",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": ">=1.0.0"
+  }
+}
