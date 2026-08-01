@@ -4,6 +4,8 @@
 //! bridge, and the CUA actuator.
 
 mod config;
+mod control_dispatch;
+mod control_socket;
 mod http;
 mod lease;
 mod state;
@@ -67,6 +69,15 @@ async fn main() -> Result<()> {
     // op-log on reconnect. Advisory only — local work never waits on it.
     let maintenance = tokio::spawn(lease::lease_maintenance(Arc::clone(&state), token.clone()));
 
+    // Control socket: NDJSON over Unix domain socket for agent harnesses
+    // (ADR 008). Pi's SessionStore connects here for session/entry ops.
+    let sock_path = control_socket::socket_path();
+    let control = tokio::spawn(control_socket::serve(
+        Arc::clone(&state),
+        sock_path,
+        token.clone(),
+    ));
+
     wait_for_shutdown_signal().await;
     info!("shutdown signal received, draining");
     token.cancel();
@@ -83,6 +94,14 @@ async fn main() -> Result<()> {
         Ok(Ok(())) => info!("lease maintenance stopped"),
         Ok(Err(e)) => warn!(error = %e, "lease maintenance task panicked"),
         Err(_) => warn!("lease maintenance did not stop within 5s; continuing shutdown"),
+    }
+
+    // Drain the control socket listener.
+    match tokio::time::timeout(Duration::from_secs(3), control).await {
+        Ok(Ok(Ok(()))) => info!("control socket stopped"),
+        Ok(Ok(Err(e))) => warn!(error = %e, "control socket error"),
+        Ok(Err(e)) => warn!(error = %e, "control socket task panicked"),
+        Err(_) => warn!("control socket did not stop within 3s; continuing shutdown"),
     }
 
     // Close the context store, flushing the WAL. The server task has
