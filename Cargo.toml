@@ -64,4 +64,4 @@ http = "1"
 hyper = { version = "1", features = ["full"] }
 http-body = "1"
 plist = "1"
-quick-xml = { version = "0.37", features = ["serialize"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
