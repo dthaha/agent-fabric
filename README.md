@@ -22,7 +22,7 @@ Agent Fabric solves one problem: **strict session context continuity across loci
 3. Memory plane         — NO LEASE. Server-side SoT (Honcho-class) + opportunistic endpoint cache.
 4. Context plane        — LEASED. Single-writer op-log. THE SPINE.
 5. Runtime plane        — LEASED with context. Who runs the loop this turn.
-6. Tool plane           — location-transparent. Same interface at every locus. Terminal = catch-all, CUA = escape hatch.
+6. Tool plane           — device-sticky, NO LEASE. Remote bridge for server-side brain. CUA lives here.
 7. Inference plane      — swappable commodity. Server = admin-configured. Endpoint = seeded.
 8. Model plane          — endpoint seeding. OS-native runtimes behind unified catalog.
 9. Agent integration    — adapter (BYO) + day-0 harness (full features).
@@ -31,11 +31,11 @@ Agent Fabric solves one problem: **strict session context continuity across loci
 ### Key invariants
 
 - Context is leased (single writer); memory is NOT
-- Tools are location-transparent; the brain never knows where a tool ran
+- Tools are device-sticky; brain is movable
 - Policy deny-wins: endpoint can tighten, NEVER loosen
 - Offline classifier lives ON the endpoint (never calls home to decide where to think)
 - Endpoint models are seeded per-OS runtime (MLX mac, ONNX win, llama.cpp linux)
-- The container image IS the capability manifest — same image at every locus
+- CUA actuator stays on endpoint; server-side brain calls it via authenticated tool bridge
 - Handoff = transfer write lease + catch-up, NOT summarize-and-restart
 
 ## Status: Landed vs Scaffold
@@ -48,11 +48,13 @@ Agent Fabric solves one problem: **strict session context continuity across loci
 | core/tools | ✅ Landed | Dispatch, terminal tool (K8s containers) |
 | core/telemetry | ✅ Landed | OTel + JSON stdout |
 | core/models | 🔨 Partial | Module registry + feature-gated discovery |
-| server/control (lease authority) | ✅ Landed | `fabric-control` bin, axum routes, SQLite store |
-| endpoint/daemon | 🔨 Partial | Health, classify, lease client; safety/pipeline not yet wired |
-| server/agent | 📋 Scaffold | Stub main, lands in a later phase |
+| server/control (lease authority) | ✅ Landed | `fabric-control` bin, axum routes, Postgres op-log + Valkey leases (ADR 004) |
+| endpoint/daemon | 🔨 Partial | Health, classify, lease client, NDJSON control socket + dispatch; safety/pipeline not yet wired |
+| server/agent | 🔨 Partial | K8s Job orchestrator for delegated agent tasks (ADR 008) |
 | core/inference, core/runtime, core/memory | 📋 Scaffold | Placeholder crates |
-| sdk/*, admin/, harness/ | 📋 Scaffold | Empty, planned |
+| harness/pi-session-backend | ✅ Landed | TypeScript SessionStore backend for pi (ADR 008) |
+| sdk/*, admin/ | 📋 Scaffold | Empty, planned |
+| eval/ | ✅ Landed | Decoder/mediator/safety eval harnesses (not in CI; run locally) |
 
 ## Repo layout
 
@@ -192,7 +194,7 @@ The fabric has exactly three scoped inference tasks, each a single pluggable tra
 
 ## Tool plane
 
-Tools behave the same way regardless of where the brain runs. The brain calls `execute(ToolRequest)` and gets a `ToolResponse`. It never knows whether the tool ran on the endpoint or in a server-side container.
+Tools are device-sticky: they run where the endpoint is, and the brain is movable. When the brain runs server-side (long-horizon or weak-endpoint cases), it reaches endpoint tools over the authenticated remote bridge; the terminal tool additionally executes server-side in ephemeral K8s containers. Either way the brain calls `execute(ToolRequest)` and gets a `ToolResponse`.
 
 **Tool hierarchy:**
 

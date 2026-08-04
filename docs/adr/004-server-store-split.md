@@ -177,17 +177,19 @@ offline, correct for that role).
 
 ## Consequences
 
-- `core/context` gains a `LeaseAuthority` trait alongside `ContextStore`.
-- `server/control` wires `ValkeyLeaseAuthority` + `PostgresContextStore`.
+- `core/context` gained a `LeaseAuthority` trait alongside `ContextStore`
+  (commit ecc5982 split the former single `ContextStore`).
+- `server/control` wires `ValkeyLeaseAuthority` + `PostgresContextStore`;
+  the impls live directly in `server/control/src/{pg_store,valkey_lease}.rs`.
+  There is no `server/store/` crate and no `server-store` feature flag —
+  `sqlx` and `fred` are unconditional deps of `server/control`.
 - `endpoint/daemon` continues using `SqliteContextStore` (unchanged).
-- New crate or module: `core/context/src/valkey.rs` (or a separate
-  `server/store/` crate) for the Valkey and Postgres impls.
-- `Cargo.toml` gains `fred` (or `redis-rs`) and `tokio-postgres` (or
-  `sqlx`) as optional deps behind a `server-store` feature flag.
-- Deploy manifests (Helm, docker-compose) add Valkey and Postgres services.
-- CI and dev use `testcontainers-rs` to spin up real Postgres + Valkey.
-  There is no SQLite fallback for the server — dev and prod run the same
-  store semantics.
+- Deploy manifests (`deploy/docker-compose.yaml`) add Valkey and Postgres
+  services for development. Helm/terraform are still `.gitkeep` stubs.
+- The server has no SQLite fallback — dev and prod run the same store
+  semantics. Integration tests against real Postgres + Valkey are
+  `#[ignore]`-gated (run them with the dev compose stack); wiring
+  testcontainers into CI is tracked but not yet done.
 
 ## References
 
