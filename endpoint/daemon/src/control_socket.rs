@@ -101,7 +101,14 @@ async fn handle_connection(stream: UnixStream, state: Arc<DaemonState>, cancel: 
             line = lines.next_line() => {
                 match line {
                     Ok(Some(line)) => {
-                        let response = process_line(&state, &line);
+                        let (mut response, req_id) = process_line(&state, &line);
+                        // Echo the request id so harness clients can
+                        // correlate responses with requests.
+                        if let Some(req_id) = req_id {
+                            if let Some(obj) = response.as_object_mut() {
+                                obj.insert("id".to_string(), req_id);
+                            }
+                        }
                         let mut out = serde_json::to_string(&response)
                             .unwrap_or_else(|_| r#"{"ok":false,"error":{"code":"unknown","message":"serialization failure"}}"#.to_string());
                         out.push('\n');
@@ -124,24 +131,65 @@ async fn handle_connection(stream: UnixStream, state: Arc<DaemonState>, cancel: 
 
 /// Parse one NDJSON line and dispatch it. Never panics — all errors
 /// become well-formed error responses.
-fn process_line(state: &DaemonState, line: &str) -> Value {
+///
+/// Returns the response object plus the request id (when one was
+/// present and extractable) so the caller can echo it into the NDJSON
+/// line for client-side correlation.
+fn process_line(state: &DaemonState, line: &str) -> (Value, Option<Value>) {
+    match parse_line(line) {
+        Ok((req_id, method, params)) => {
+            let response = match control_dispatch::dispatch(state, &method, &params) {
+                Ok(result) => json!({ "ok": true, "result": result }),
+                Err(e) => error_response(&e),
+            };
+            (response, req_id)
+        }
+        Err((response, req_id)) => (response, req_id),
+    }
+}
+
+/// Parsed request: request id (if any), method, params.
+type ParsedRequest = (Option<Value>, String, Value);
+
+/// Parse failure: error response plus whatever id was extracted before
+/// the failure.
+type ParseFailure = (Value, Option<Value>);
+
+/// Parse and validate one NDJSON request line. On success returns the
+/// request id (if any), method, and params. On failure returns the
+/// error response plus whatever id could be extracted before the
+/// failure.
+fn parse_line(line: &str) -> Result<ParsedRequest, ParseFailure> {
     let line = line.trim();
     if line.is_empty() {
-        return error_response(&ControlError::Unknown("empty line".into()));
+        return Err((
+            error_response(&ControlError::Unknown("empty line".into())),
+            None,
+        ));
     }
 
     let request: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(&ControlError::Unknown(format!("invalid JSON: {e}")));
+            return Err((
+                error_response(&ControlError::Unknown(format!("invalid JSON: {e}"))),
+                None,
+            ));
         }
     };
 
+    // Extract the id as early as possible so it can be echoed even in
+    // error responses for malformed requests.
+    let req_id = request.get("id").cloned();
+
     let method = match request.get("method").and_then(|m| m.as_str()) {
-        Some(m) => m,
+        Some(m) => m.to_string(),
         None => {
-            return error_response(&ControlError::Unknown(
-                "missing or non-string 'method' field".into(),
+            return Err((
+                error_response(&ControlError::Unknown(
+                    "missing or non-string 'method' field".into(),
+                )),
+                req_id,
             ));
         }
     };
@@ -151,10 +199,7 @@ fn process_line(state: &DaemonState, line: &str) -> Value {
         .cloned()
         .unwrap_or(Value::Object(Default::default()));
 
-    match control_dispatch::dispatch(state, method, &params) {
-        Ok(result) => json!({ "ok": true, "result": result }),
-        Err(e) => error_response(&e),
-    }
+    Ok((req_id, method, params))
 }
 
 /// Build a well-formed NDJSON error response.
@@ -172,57 +217,58 @@ fn error_response(err: &ControlError) -> Value {
 mod tests {
     use super::*;
 
+    // These tests exercise parse_line + response assembly only, since
+    // dispatching needs a real DaemonState (SQLite store).
+    // (Full integration tests are in tests/control_socket.rs.)
+
     #[test]
-    fn process_line_invalid_json() {
-        // We can't easily construct a DaemonState in a unit test without
-        // the SQLite store, so test the JSON parsing layer only via
-        // process_line's early-exit paths that don't touch state.
-        // (Full integration tests are in tests/control_socket.rs.)
-        let resp = process_line_invalid_json_helper("not json at all");
+    fn parse_line_invalid_json() {
+        let (resp, req_id) = parse_line("not json at all").unwrap_err();
         assert_eq!(resp["ok"], false);
         assert_eq!(resp["error"]["code"], "unknown");
+        assert!(req_id.is_none());
     }
 
     #[test]
-    fn process_line_missing_method() {
-        let resp = process_line_invalid_json_helper(r#"{"params": {}}"#);
+    fn parse_line_missing_method() {
+        let (resp, req_id) = parse_line(r#"{"id": "req-1", "params": {}}"#).unwrap_err();
         assert_eq!(resp["ok"], false);
         assert_eq!(resp["error"]["code"], "unknown");
         assert!(resp["error"]["message"]
             .as_str()
             .unwrap()
             .contains("method"));
+        // The id was parsed before the failure, so it can be echoed.
+        assert_eq!(req_id, Some(json!("req-1")));
     }
 
     #[test]
-    fn process_line_empty() {
-        let resp = process_line_invalid_json_helper("");
+    fn parse_line_empty() {
+        let (resp, req_id) = parse_line("").unwrap_err();
         assert_eq!(resp["ok"], false);
+        assert!(req_id.is_none());
     }
 
-    /// Helper: exercise the JSON-parsing paths of process_line without
-    /// needing a real DaemonState. These paths return before touching
-    /// state, so we pass a dummy. This is a compile-time trick — the
-    /// function signature requires &DaemonState but these code paths
-    /// never dereference it.
-    fn process_line_invalid_json_helper(line: &str) -> Value {
-        // Parse + validate JSON structure without dispatching.
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return error_response(&ControlError::Unknown("empty line".into()));
-        }
-        let request: Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(e) => {
-                return error_response(&ControlError::Unknown(format!("invalid JSON: {e}")));
-            }
-        };
-        if request.get("method").and_then(|m| m.as_str()).is_none() {
-            return error_response(&ControlError::Unknown(
-                "missing or non-string 'method' field".into(),
-            ));
-        }
-        // If we get here, method is valid — would need state to dispatch.
-        json!({ "ok": true, "result": null })
+    #[test]
+    fn parse_line_extracts_id_method_params() {
+        let (req_id, method, params) =
+            parse_line(r#"{"id":"abc-123","method":"session.open","params":{"a":1}}"#).unwrap();
+        assert_eq!(req_id, Some(json!("abc-123")));
+        assert_eq!(method, "session.open");
+        assert_eq!(params, json!({ "a": 1 }));
+    }
+
+    #[test]
+    fn parse_line_defaults_missing_id_and_params() {
+        let (req_id, method, params) = parse_line(r#"{"method":"session.open"}"#).unwrap();
+        assert!(req_id.is_none());
+        assert_eq!(method, "session.open");
+        assert_eq!(params, json!({}));
+    }
+
+    #[test]
+    fn parse_line_non_string_id_echoed_verbatim() {
+        let (req_id, ..) = parse_line(r#"{"id":42,"method":"session.open"}"#).unwrap();
+        assert_eq!(req_id, Some(json!(42)));
     }
 }
