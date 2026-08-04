@@ -114,6 +114,7 @@ async fn delegate_creates_job_then_cancel_reaps_it() {
             namespace: "default".into(),
             pg_url: "postgres://unused".into(),
             kv_url: "redis://unused".into(),
+            creds_secret_name: "fabric-agent-creds-test".into(),
         },
     );
 

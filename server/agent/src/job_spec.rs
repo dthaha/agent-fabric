@@ -8,17 +8,23 @@ use std::collections::BTreeMap;
 
 use k8s_openapi::api::batch::v1::{Job, JobSpec};
 use k8s_openapi::api::core::v1::{
-    Capabilities, Container, EnvVar, PodSecurityContext, PodSpec, PodTemplateSpec,
-    ResourceRequirements, SeccompProfile, SecurityContext,
+    Capabilities, Container, EnvVar, EnvVarSource, PodSecurityContext, PodSpec, PodTemplateSpec,
+    ResourceRequirements, SeccompProfile, Secret, SecretKeySelector, SecurityContext,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use k8s_openapi::ByteString;
 use uuid::Uuid;
 
 use crate::orchestrator::AgentTaskRequest;
 
 /// Default namespace for agent Jobs (`FABRIC_K8S_NAMESPACE` overrides).
 pub const DEFAULT_NAMESPACE: &str = "fabric-agents";
+
+/// Default name of the Secret holding the Postgres/Valkey DSNs that agent
+/// Jobs mount via `secretKeyRef`. Jobs never carry the DSNs as literal env
+/// values — anyone with `get pod` RBAC could read them otherwise.
+pub const CREDS_SECRET_NAME: &str = "fabric-agent-creds";
 
 /// Jobs self-clean 5 minutes after finishing; the spine is the record.
 pub const TTL_SECONDS_AFTER_FINISHED: i32 = 300;
@@ -32,12 +38,16 @@ const JOB_NAME_PREFIX: &str = "fabric-agent-";
 const SESSION_SHORT_MAX: usize = 38;
 const UUID_SHORT_LEN: usize = 8;
 
-/// Server-side config baked into the Job as env vars.
+/// Server-side config for building agent Jobs. The DSNs live here only so
+/// the orchestrator can materialize the credentials Secret; they are never
+/// rendered into the Job spec (the Job reads them via `secretKeyRef`).
 #[derive(Clone, Debug)]
 pub struct JobSpecConfig {
     pub namespace: String,
     pub pg_url: String,
     pub kv_url: String,
+    /// Name of the Secret carrying `FABRIC_PG_URL` / `FABRIC_KV_URL`.
+    pub creds_secret_name: String,
 }
 
 /// Lowercase DNS-1123-label-safe rendering: alnum kept, anything else
@@ -105,6 +115,47 @@ fn env(name: &str, value: &str) -> EnvVar {
     }
 }
 
+/// Env var sourced from a Secret key — the DSN never appears as a literal
+/// in the Job spec.
+fn secret_env(name: &str, secret_name: &str, key: &str) -> EnvVar {
+    EnvVar {
+        name: name.to_string(),
+        value: None,
+        value_from: Some(EnvVarSource {
+            secret_key_ref: Some(SecretKeySelector {
+                name: secret_name.to_string(),
+                key: key.to_string(),
+                optional: Some(false),
+            }),
+            ..Default::default()
+        }),
+    }
+}
+
+/// Build the Secret that holds the Postgres/Valkey DSNs for agent Jobs.
+/// `ByteString` carries raw bytes; k8s-openapi base64-encodes on the wire.
+pub fn build_creds_secret(name: &str, namespace: &str, pg_url: &str, kv_url: &str) -> Secret {
+    Secret {
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            namespace: Some(namespace.to_string()),
+            labels: Some(BTreeMap::from([("app".into(), "fabric".into())])),
+            ..Default::default()
+        },
+        data: Some(BTreeMap::from([
+            (
+                "FABRIC_PG_URL".into(),
+                ByteString(pg_url.as_bytes().to_vec()),
+            ),
+            (
+                "FABRIC_KV_URL".into(),
+                ByteString(kv_url.as_bytes().to_vec()),
+            ),
+        ])),
+        ..Default::default()
+    }
+}
+
 /// Labels identifying the task on the Job and its pod template.
 fn task_labels(task_id: &str, session_id: &str, soul_id: &str) -> BTreeMap<String, String> {
     BTreeMap::from([
@@ -146,8 +197,9 @@ pub fn build_job(
             "require('@fabric/pi-session-backend/headless').run()".into(),
         ]),
         env: Some(vec![
-            env("FABRIC_PG_URL", &cfg.pg_url),
-            env("FABRIC_KV_URL", &cfg.kv_url),
+            // DSNs via secretKeyRef — never literal env values on the Job.
+            secret_env("FABRIC_PG_URL", &cfg.creds_secret_name, "FABRIC_PG_URL"),
+            secret_env("FABRIC_KV_URL", &cfg.creds_secret_name, "FABRIC_KV_URL"),
             env("FABRIC_SESSION_ID", &req.session_id),
             env("FABRIC_SOUL_ID", &req.soul_id),
             env("FABRIC_ORG_ID", &req.org_id),
@@ -224,6 +276,7 @@ mod tests {
             namespace: DEFAULT_NAMESPACE.into(),
             pg_url: "postgres://fabric:fabric@postgres:5432/fabric".into(),
             kv_url: "redis://valkey:6379".into(),
+            creds_secret_name: CREDS_SECRET_NAME.into(),
         }
     }
 
@@ -244,7 +297,7 @@ mod tests {
         }
     }
 
-    fn env_map(job: &Job) -> BTreeMap<String, String> {
+    fn container_env(job: &Job) -> &[EnvVar] {
         job.spec
             .as_ref()
             .unwrap()
@@ -256,8 +309,27 @@ mod tests {
             .env
             .as_ref()
             .unwrap()
+    }
+
+    /// Literal env values only (secretKeyRef vars have value == None).
+    fn env_map(job: &Job) -> BTreeMap<String, String> {
+        container_env(job)
             .iter()
-            .map(|e| (e.name.clone(), e.value.clone().unwrap()))
+            .filter_map(|e| e.value.clone().map(|v| (e.name.clone(), v)))
+            .collect()
+    }
+
+    /// The Secret a secretKeyRef env var points at, keyed by env var name.
+    fn secret_refs(job: &Job) -> BTreeMap<String, (String, String)> {
+        container_env(job)
+            .iter()
+            .filter_map(|e| {
+                e.value_from.as_ref().and_then(|src| {
+                    src.secret_key_ref
+                        .as_ref()
+                        .map(|r| (e.name.clone(), (r.name.clone(), r.key.clone())))
+                })
+            })
             .collect()
     }
 
@@ -370,13 +442,24 @@ mod tests {
         assert_eq!(limits.get("memory").unwrap(), &Quantity("4096Mi".into()));
         assert_eq!(resources.requests.as_ref().unwrap(), limits);
 
+        // DSNs must be secretKeyRefs into the creds Secret — never
+        // literal env values on the Job spec.
+        let refs = secret_refs(&job);
+        let pg = refs.get("FABRIC_PG_URL").expect("PG DSN via secretKeyRef");
+        let kv = refs.get("FABRIC_KV_URL").expect("KV DSN via secretKeyRef");
+        assert_eq!(pg, &(CREDS_SECRET_NAME.into(), "FABRIC_PG_URL".into()));
+        assert_eq!(kv, &(CREDS_SECRET_NAME.into(), "FABRIC_KV_URL".into()));
+        // The literal map must NOT contain the DSNs.
         let env = env_map(&job);
+        assert!(
+            !env.contains_key("FABRIC_PG_URL"),
+            "PG DSN leaked as literal env"
+        );
+        assert!(
+            !env.contains_key("FABRIC_KV_URL"),
+            "KV DSN leaked as literal env"
+        );
         let expected = [
-            (
-                "FABRIC_PG_URL",
-                "postgres://fabric:fabric@postgres:5432/fabric",
-            ),
-            ("FABRIC_KV_URL", "redis://valkey:6379"),
             ("FABRIC_SESSION_ID", "sess-abc123"),
             ("FABRIC_SOUL_ID", "soul-xyz"),
             ("FABRIC_ORG_ID", "org-1"),
@@ -388,6 +471,27 @@ mod tests {
         for (key, value) in expected {
             assert_eq!(env.get(key).map(String::as_str), Some(value), "env {key}");
         }
+    }
+
+    #[test]
+    fn creds_secret_carries_both_dsns() {
+        let secret = build_creds_secret(
+            "fabric-agent-creds",
+            DEFAULT_NAMESPACE,
+            "postgres://u:pw@pg:5432/db",
+            "redis://valkey:6379",
+        );
+        assert_eq!(secret.metadata.name.as_deref(), Some("fabric-agent-creds"));
+        assert_eq!(
+            secret.metadata.namespace.as_deref(),
+            Some(DEFAULT_NAMESPACE)
+        );
+        let data = secret.data.as_ref().unwrap();
+        assert_eq!(
+            data.get("FABRIC_PG_URL").unwrap().0,
+            b"postgres://u:pw@pg:5432/db"
+        );
+        assert_eq!(data.get("FABRIC_KV_URL").unwrap().0, b"redis://valkey:6379");
     }
 
     #[test]

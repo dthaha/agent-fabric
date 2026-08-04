@@ -10,6 +10,7 @@ use chrono::Utc;
 use fabric_context::{LeaseAuthority, StoreError, DEFAULT_LEASE_TTL_MS, MAX_LEASE_TTL_MS};
 use fabric_types::context::Locus;
 use k8s_openapi::api::batch::v1::Job;
+use k8s_openapi::api::core::v1::Secret;
 use kube::api::{Api, DeleteParams, PostParams};
 use sqlx::{PgPool, Row};
 use tracing::{info, instrument, warn};
@@ -86,6 +87,38 @@ impl<L: LeaseAuthority + Clone + Send + Sync + 'static> AgentTaskOrchestrator<L>
         Api::namespaced(self.kube.clone(), &self.spec.namespace)
     }
 
+    fn secrets(&self) -> Api<Secret> {
+        Api::namespaced(self.kube.clone(), &self.spec.namespace)
+    }
+
+    /// Ensure the credentials Secret exists before creating any Job: the
+    /// Job's DSN env vars are `secretKeyRef`s into it, so a missing Secret
+    /// would leave every agent pod stuck in CreateContainerConfigError.
+    /// Idempotent: create-or-patch (409 on the create is folded into a
+    /// full replace), so rotated DSNs propagate too.
+    async fn ensure_creds_secret(&self) -> Result<(), AgentTaskError> {
+        let secret = job_spec::build_creds_secret(
+            &self.spec.creds_secret_name,
+            &self.spec.namespace,
+            &self.spec.pg_url,
+            &self.spec.kv_url,
+        );
+        let api = self.secrets();
+        match api.create(&PostParams::default(), &secret).await {
+            Ok(_) => Ok(()),
+            Err(kube::Error::Api(resp)) if resp.code == 409 => {
+                api.replace(
+                    &self.spec.creds_secret_name,
+                    &PostParams::default(),
+                    &secret,
+                )
+                .await?;
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Full lifecycle: acquire lease → create Job → monitor → release lease.
     /// Returns once the Job is created; the monitor task finishes the
     /// lifecycle in the background.
@@ -127,6 +160,12 @@ impl<L: LeaseAuthority + Clone + Send + Sync + 'static> AgentTaskOrchestrator<L>
         }
 
         let job = job_spec::build_job(&req, &task_id, &job_name, &lease.lease_id, &self.spec);
+        if let Err(e) = self.ensure_creds_secret().await {
+            self.set_terminal_quiet(&record.task_id, TaskState::Failed)
+                .await;
+            self.release_lease_best_effort(&record).await;
+            return Err(e);
+        }
         if let Err(e) = self.jobs().create(&PostParams::default(), &job).await {
             self.set_terminal_quiet(&record.task_id, TaskState::Failed)
                 .await;

@@ -55,10 +55,13 @@ async fn init_orchestrator() -> Result<Option<AgentTaskOrchestrator<ValkeyLeaseA
 
     let namespace = std::env::var("FABRIC_K8S_NAMESPACE")
         .unwrap_or_else(|_| job_spec::DEFAULT_NAMESPACE.into());
+    let creds_secret_name = std::env::var("FABRIC_K8S_CREDS_SECRET")
+        .unwrap_or_else(|_| job_spec::CREDS_SECRET_NAME.into());
     let spec = JobSpecConfig {
         namespace,
         pg_url,
         kv_url,
+        creds_secret_name,
     };
     Ok(Some(AgentTaskOrchestrator::new(kube, leases, pool, spec)))
 }
