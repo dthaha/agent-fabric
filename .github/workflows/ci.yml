@@ -14,6 +14,20 @@ jobs:
           version: 1.47.2
       - run: buf lint
 
+  proto-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: 1.47.2
+          setup_only: true
+      # Generated prost/pbjson files are committed; a PR editing proto/
+      # without re-running `make proto` must not merge green.
+      - run: make proto
+      - run: git diff --exit-code
+      - run: test -z "$(git status --porcelain core/types/src/gen)"
+
   fmt:
     runs-on: ubuntu-latest
     steps:
@@ -42,6 +56,14 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-action@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   no-default-features:
     runs-on: ubuntu-latest
