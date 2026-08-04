@@ -11,8 +11,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
+use tokio_stream::StreamExt;
 use tokio::net::{UnixListener, UnixStream};
+use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -21,6 +23,11 @@ use crate::state::DaemonState;
 
 /// Default socket path when FABRIC_SOCKET_PATH is unset.
 const DEFAULT_SOCKET_PATH: &str = "/tmp/fabric-endpoint.sock";
+
+/// Hard cap on one NDJSON request line (1 MiB). Guards against a
+/// client growing daemon memory without bound with a giant line;
+/// legit control requests are far smaller.
+const MAX_LINE_LEN: usize = 1024 * 1024;
 
 /// Resolve the control socket path from the environment.
 pub fn socket_path() -> PathBuf {
@@ -89,19 +96,36 @@ pub async fn serve(
 }
 
 /// Handle a single client connection: read NDJSON lines, dispatch, respond.
+///
+/// Dispatch runs on tokio's blocking thread pool — the SQLite-backed
+/// `control_dispatch` work must never stall the async executor — and
+/// each request line is capped at [`MAX_LINE_LEN`].
 async fn handle_connection(stream: UnixStream, state: Arc<DaemonState>, cancel: CancellationToken) {
     let (reader, mut writer) = stream.into_split();
-    let mut lines = BufReader::new(reader).lines();
+    let mut framed = FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_LINE_LEN));
 
     debug!("control socket client connected");
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
-            line = lines.next_line() => {
-                match line {
-                    Ok(Some(line)) => {
-                        let (mut response, req_id) = process_line(&state, &line);
+            item = framed.next() => {
+                match item {
+                    Some(Ok(line)) => {
+                        let (mut response, req_id) = match tokio::task::spawn_blocking({
+                            let state = Arc::clone(&state);
+                            move || process_line(&state, &line)
+                        })
+                        .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => (
+                                error_response(&ControlError::Unknown(format!(
+                                    "dispatch task failed: {e}"
+                                ))),
+                                None,
+                            ),
+                        };
                         // Echo the request id so harness clients can
                         // correlate responses with requests.
                         if let Some(req_id) = req_id {
@@ -116,11 +140,23 @@ async fn handle_connection(stream: UnixStream, state: Arc<DaemonState>, cancel: 
                             break; // client disconnected
                         }
                     }
-                    Ok(None) => break, // EOF
-                    Err(e) => {
-                        warn!(error = %e, "control socket read error");
+                    Some(Err(e)) => {
+                        if e.to_string().contains("max length") {
+                            warn!("control socket client sent a line over the {MAX_LINE_LEN}-byte cap");
+                            let mut out = serde_json::to_string(&error_response(
+                                &ControlError::Unknown(format!(
+                                    "request line exceeds the {MAX_LINE_LEN}-byte limit"
+                                )),
+                            ))
+                            .unwrap_or_default();
+                            out.push('\n');
+                            let _ = writer.write_all(out.as_bytes()).await;
+                        } else {
+                            warn!(error = %e, "control socket read error");
+                        }
                         break;
                     }
+                    None => break, // EOF
                 }
             }
         }
