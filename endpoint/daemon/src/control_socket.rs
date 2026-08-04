@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
-use tokio_stream::StreamExt;
 use tokio::net::{UnixListener, UnixStream};
+use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};

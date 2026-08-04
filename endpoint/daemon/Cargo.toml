@@ -29,7 +29,6 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-fabric-control = { path = "../../server/control" }
 pbjson-types.workspace = true
 tower = { version = "0.5", features = ["util"] }
 

@@ -3,13 +3,6 @@
 //! local context store, the offline classifier, seeded models, the tool
 //! bridge, and the CUA actuator.
 
-mod config;
-mod control_dispatch;
-mod control_socket;
-mod http;
-mod lease;
-mod state;
-
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,8 +11,11 @@ use anyhow::{Context, Result};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::config::DaemonConfig;
-use crate::state::DaemonState;
+use fabric_endpoint::config::DaemonConfig;
+use fabric_endpoint::control_socket;
+use fabric_endpoint::http;
+use fabric_endpoint::lease;
+use fabric_endpoint::state::DaemonState;
 
 #[tokio::main]
 async fn main() -> Result<()> {

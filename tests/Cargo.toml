@@ -1,0 +1,21 @@
+[package]
+name = "fabric-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Cross-crate integration tests (AGENTS.md repo layout: "tests/ =
+# integration + e2e"). The only place allowed to depend on both the
+# endpoint and the server, so endpoint crates never layer on top of
+# server crates.
+
+[dependencies]
+fabric-endpoint = { path = "../endpoint/daemon" }
+fabric-control = { path = "../server/control" }
+fabric-context = { path = "../core/context" }
+fabric-types = { path = "../core/types" }
+axum.workspace = true
+pbjson-types.workspace = true
+tokio.workspace = true

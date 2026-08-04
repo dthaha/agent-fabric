@@ -774,7 +774,6 @@ dependencies = [
  "axum",
  "fabric-classifier",
  "fabric-context",
- "fabric-control",
  "fabric-endpoint-mdm",
  "fabric-policy",
  "fabric-telemetry",
@@ -972,6 +971,19 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "fabric-tests"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "fabric-context",
+ "fabric-control",
+ "fabric-endpoint",
+ "fabric-types",
+ "pbjson-types",
+ "tokio",
 ]
 
 [[package]]

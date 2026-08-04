@@ -27,6 +27,7 @@ members = [
     "sdk/fabric-adapter",
     "sdk/fabric-tools",
     "sdk/fabric-policy",
+    "tests",
 ]
 
 [workspace.package]
