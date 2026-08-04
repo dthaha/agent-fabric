@@ -6,12 +6,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-opentelemetry = "0.31"
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "trace", "logs"] }
-opentelemetry-semantic-conventions = "0.31"
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "trace", "logs"] }
+opentelemetry-semantic-conventions = "0.32"
 tracing.workspace = true
-tracing-opentelemetry = "0.32"
+tracing-opentelemetry = "0.33"
 tracing-subscriber = { workspace = true, features = ["env-filter", "json", "registry", "fmt"] }
 tokio.workspace = true
 thiserror.workspace = true
