@@ -39,7 +39,7 @@ repository = "https://github.com/dthaha/agent-fabric"
 [workspace.dependencies]
 prost = "0.13"
 prost-types = "0.13"
-pbjson = "0.7"
+pbjson = "0.9"
 pbjson-types = "0.7"
 regex = "1"
 tokio = { version = "1", features = ["full"] }
