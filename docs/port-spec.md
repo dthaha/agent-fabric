@@ -53,3 +53,33 @@ proto/     buf-managed, unchanged — generates Go via protoc-gen-go
 
 Inference backends (MLX / ONNX / llama.cpp) run as **sidecar processes**
 behind their localhost HTTP APIs; the daemon never embeds them.
+
+## 5. Context assembly (ADR 009) — governs the Go context plane
+
+Conflict decode/mediate never receives an unbounded raw window. Assembly
+is: `checkpoint + per-locus tails + raw[-N] + conflict pair`, token-
+budgeted, oldest-first trim.
+
+Frozen vocabulary for the Go port:
+
+| Term | Meaning |
+|---|---|
+| checkpoint | server-computed summary of the converged spine `[0..covered_through_seq]`; chain-versioned; distributed via catch-up/handoff; clients cache, never compute |
+| tail summary | ephemeral per-locus digest of that locus's unsynced branch; mediation-scoped; server recomputes or accepts per policy; never persisted as authority |
+| assembly | the bounded context handed to decoder/mediator tiers |
+| coverage | seq-range `[start, end]` + version carried by every summary node |
+
+Rules the Go port must preserve:
+
+1. Summaries are **derived** — seq-range-keyed store, never op-log entries.
+   The spine stays append-only, verbatim, single-writer.
+2. Checkpoint authority is server-only. Clients that compute their own
+   checkpoint are divergent by definition (non-deterministic LLM digests).
+3. Tail summaries are untrusted endpoint claims — treat like `created_at`
+   (ADR 006): accept or recompute per policy.
+4. In-flight structure is a depth-2 tree (checkpoint → tails → raw), not a
+   DAG store. Drill-down is seq-range fetch against the spine.
+5. Summarizer is an interface with a deterministic truncate default; LLM
+   summarizers plug into the same seam. Assembly never requires a model.
+6. Handoff invariant unchanged: lease-transfer + catch-up, never
+   summarize-and-restart.
